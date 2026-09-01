@@ -390,7 +390,7 @@ async function submitOfficialPageTurn(debuggee, timeoutMs) {
   }
 }
 
-async function executeOfficialPageTurn({ tabId, text, timeoutMs, onUiState = null }) {
+async function executeOfficialPageTurn({ tabId, text, timeoutMs, onUiState = null, submitOnly = false }) {
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
   if (typeof text !== "string" || !text.trim()) throw new Error("TEXT_REQUIRED");
   if (text.length > 200_000) throw new Error("TEXT_TOO_LARGE_FOR_BROWSER_NATIVE_TURN");
@@ -492,6 +492,18 @@ async function executeOfficialPageTurn({ tabId, text, timeoutMs, onUiState = nul
     ]);
     diagnostics.submitAckMs = elapsedMs(submitStartedAt);
 
+    if (submitOnly) {
+      const finalTab = await chrome.tabs.get(tabId);
+      diagnostics.responseStatus = 202;
+      diagnostics.elapsedMs = elapsedMs(startedAt);
+      return {
+        diagnostics,
+        finalUrl: finalTab.url || "",
+        conversationId: conversationIdFromUrl(finalTab.url || ""),
+        turnExchangeId: null
+      };
+    }
+
     const reportUiState = async () => {
       if (typeof onUiState !== "function") return;
       try {
@@ -591,11 +603,15 @@ async function executeNativeTurn(message) {
     tabId: tab.id,
     text: message.text,
     timeoutMs,
-    onUiState
+    onUiState,
+    submitOnly: message.submitOnly === true
   });
   const resolvedConversationId = result.conversationId || conversationId;
-  if (!resolvedConversationId) throw new Error("CHATGPT_TURN_MISSING_CONVERSATION_ID");
-  if (result.diagnostics.responseStatus !== 200) {
+  if (!resolvedConversationId && message.submitOnly !== true) {
+    throw new Error("CHATGPT_TURN_MISSING_CONVERSATION_ID");
+  }
+  const expectedStatus = message.submitOnly === true ? 202 : 200;
+  if (result.diagnostics.responseStatus !== expectedStatus) {
     throw new Error(`CHATGPT_TURN_HTTP_STATUS:${result.diagnostics.responseStatus}`);
   }
   if (result.diagnostics.debuggerAttachedAfter === true) {

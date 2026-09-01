@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import inspect
 import time
 from pathlib import Path
@@ -19,6 +22,24 @@ from .types import (
     ChatResponse,
     ConversationRef,
 )
+
+
+_SUBMIT_ONLY: ContextVar[bool] = ContextVar("browser_native_submit_only", default=False)
+
+
+class BrowserNativeSubmissionAcknowledged(Exception):
+    def __init__(self, turn: Any) -> None:
+        super().__init__("BROWSER_NATIVE_SUBMISSION_ACKNOWLEDGED")
+        self.turn = turn
+
+
+@contextmanager
+def browser_native_submit_only_scope():
+    token = _SUBMIT_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _SUBMIT_ONLY.reset(token)
 
 
 def set_browser_native_turn_provider(self: Any, provider: BrowserNativeTurnProvider | None) -> None:
@@ -265,6 +286,7 @@ def send_browser_native(
         baseline_assistant_ids = _assistant_message_ids(self, conversation)
         canonical_status_before_turn = _canonical_status_value(self, conversation)
 
+    submit_only = _SUBMIT_ONLY.get()
     recovery_send = getattr(provider, "send_text_with_stale_ui_recovery", None)
     recovery_stream_send = getattr(
         provider, "send_text_with_stale_ui_recovery_streaming", None
@@ -305,7 +327,20 @@ def send_browser_native(
         if normalized_attachment_paths
         else {}
     )
-    if recovery_authorized:
+    if submit_only:
+        submit = getattr(provider, "submit_text", None)
+        if not callable(submit):
+            raise RequestError(
+                "BROWSER_NATIVE_SUBMIT_ONLY_UNSUPPORTED",
+                request_stage="browser_native_turn_preflight",
+            )
+        turn = submit(
+            prompt,
+            conversation=conversation,
+            timeout=timeout,
+            **attachment_kwargs,
+        )
+    elif recovery_authorized:
         canonical_completed_at_ms = int(time.time() * 1000)
         if streaming_requested and callable(recovery_stream_send):
             if normalized_attachment_paths and not _callable_accepts_attachment_paths(recovery_stream_send):
@@ -396,6 +431,9 @@ def send_browser_native(
         attachment_count=attachment_count,
         revision_safe_stream_observation_count=stream_state.observation_count,
     )
+
+    if submit_only:
+        raise BrowserNativeSubmissionAcknowledged(turn)
 
     remaining = max(1.0, timeout - (time.monotonic() - started))
     final_message, canonical_payload, canonical_payload_read_count = _wait_for_new_final_assistant(

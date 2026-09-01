@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext as _nullcontext
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,10 @@ from .browser_native_install import (
     install_native_messaging_host,
 )
 from .browser_native_provider import BrowserNativeTurnProvider
+from .browser_native_client import (
+    BrowserNativeSubmissionAcknowledged,
+    browser_native_submit_only_scope,
+)
 from .client import ChatGPTWebClient
 from .conversation_snapshot import snapshot_conversation
 from .exceptions import WebChatAdapterError
@@ -144,6 +149,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     send.add_argument("--timeout", type=float, default=150.0)
     send.add_argument("--poll-interval", type=float, default=0.5)
+    send.add_argument(
+        "--submit-only",
+        action="store_true",
+        help="return after the official page acknowledges submission; do not wait for the reply",
+    )
     send.add_argument(
         "--timings",
         action="store_true",
@@ -367,15 +377,27 @@ def _run_send(args: argparse.Namespace) -> int:
 
     execution = None
     try:
-        execution = runtime.send_text_observed(
-            args.text,
-            conversation=args.conversation,
-            timeout=args.timeout,
-            poll_interval=args.poll_interval,
-            on_event=on_event,
-            model_profile=args.profile,
-            conversation_mode="temporary" if args.temporary else "normal",
-        )
+        try:
+            with browser_native_submit_only_scope() if args.submit_only else _nullcontext():
+                execution = runtime.send_text_observed(
+                    args.text,
+                    conversation=args.conversation,
+                    timeout=args.timeout,
+                    poll_interval=args.poll_interval,
+                    on_event=on_event,
+                    model_profile=args.profile,
+                    conversation_mode="temporary" if args.temporary else "normal",
+                )
+        except BrowserNativeSubmissionAcknowledged as acknowledged:
+            turn = acknowledged.turn
+            print(json.dumps({
+                "ok": True,
+                "submitted": True,
+                "conversation_id": turn.conversation_id,
+                "backend_status": turn.response_status,
+                "elapsed_ms": turn.elapsed_ms,
+            }, ensure_ascii=False))
+            return 0
         if timing_observer is not None:
             timing_observer.mark_runtime_return()
         if args.temporary:

@@ -15,7 +15,11 @@ from .browser_authority_lease import (
     TurnLifecycleState,
     resolve_browser_authority_policy,
 )
-from .browser_native_client import send_browser_native, set_browser_native_turn_provider
+from .browser_native_client import (
+    BrowserNativeSubmissionAcknowledged,
+    send_browser_native,
+    set_browser_native_turn_provider,
+)
 from .browser_native_provider import BrowserNativeBridgeStatus, BrowserNativeTurnProvider
 from .exceptions import ConversationTimeoutError, RequestError, WebChatAdapterError
 from .types import ChatConversation, ChatResponse, ConversationRef
@@ -711,6 +715,8 @@ class BrowserOwnedProductWriteRuntime:
                 # not enough evidence to start a disposal TTL.
                 lease_ref = self._mark_release_unknown(lease_ref)
             return response
+        except BrowserNativeSubmissionAcknowledged:
+            raise
         except ConversationTimeoutError as error:
             turn_ref = self._fail_turn(
                 turn_ref,

@@ -30,7 +30,7 @@ class BrowserNativeBridgeStatus:
 
 @dataclass(frozen=True)
 class BrowserNativeTurnResult:
-    conversation_id: str
+    conversation_id: str | None
     turn_exchange_id: str | None
     response_status: int
     response_mime_type: str | None
@@ -258,6 +258,7 @@ class BrowserNativeTurnProvider:
         canonical_completed_at_ms: int | None,
         attachment_paths: Sequence[str | Path] | None = None,
         on_text_event: Callable[[dict[str, Any]], None] | None = None,
+        submit_only: bool = False,
     ) -> BrowserNativeTurnResult:
         if not isinstance(text, str) or not text.strip():
             raise ValueError("text is required")
@@ -291,6 +292,7 @@ class BrowserNativeTurnProvider:
                 "canonicalCompletedAtMs": canonical_completed_at_ms,
                 "browserAuthorityLeaseId": authority_lease_id,
                 "streamTextObservations": on_text_event is not None,
+                "submitOnly": submit_only,
             },
             timeout=total_timeout + self.connect_timeout,
             on_event=on_text_event,
@@ -311,7 +313,10 @@ class BrowserNativeTurnProvider:
             raise RequestError(error, request_stage="browser_native_turn")
         result_conversation_id = response.get("conversationId")
         status = response.get("responseStatus")
-        if not isinstance(result_conversation_id, str) or not result_conversation_id.strip():
+        if (
+            not submit_only
+            and (not isinstance(result_conversation_id, str) or not result_conversation_id.strip())
+        ):
             raise RequestError(
                 "BROWSER_NATIVE_TURN_MISSING_CONVERSATION_ID",
                 request_stage="browser_native_turn",
@@ -337,7 +342,11 @@ class BrowserNativeTurnProvider:
                 request_stage="browser_native_turn",
             )
         return BrowserNativeTurnResult(
-            conversation_id=result_conversation_id.strip(),
+            conversation_id=(
+                result_conversation_id.strip()
+                if isinstance(result_conversation_id, str) and result_conversation_id.strip()
+                else None
+            ),
             turn_exchange_id=response.get("turnExchangeId")
             if isinstance(response.get("turnExchangeId"), str)
             else None,
@@ -491,4 +500,22 @@ class BrowserNativeTurnProvider:
             already_absent=bool(response.get("alreadyAbsent")),
             runtime_tab_id=runtime_tab_id if isinstance(runtime_tab_id, int) else None,
             browser_authority_lease_id=lease_id,
+        )
+
+    def submit_text(
+        self,
+        text: str,
+        *,
+        conversation: ConversationRef | ChatConversation | dict[str, Any] | str | None = None,
+        timeout: float | None = None,
+        attachment_paths: Sequence[str | Path] | None = None,
+    ) -> BrowserNativeTurnResult:
+        """Submit an existing-conversation turn and return after page acknowledgement."""
+        return self._send_text_request(
+            text,
+            conversation=conversation,
+            timeout=timeout,
+            canonical_completed_at_ms=None,
+            attachment_paths=attachment_paths,
+            submit_only=True,
         )

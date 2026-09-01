@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import chatgpt_web_adapter.cli as cli
+from chatgpt_web_adapter.browser_native_client import BrowserNativeSubmissionAcknowledged
 
 
 class _Health:
@@ -156,3 +157,37 @@ def test_runtime_send_cli_returns_machine_readable_product_result(monkeypatch, c
     assert payload["runtime_observation"]["runtime_tab_id"] == 77
     assert payload["provenance"]["completion"]["source"] == "CANONICAL_READBACK"
     assert payload["provenance"]["completion"]["finish_reason_observed"] is True
+
+
+def test_send_submit_only_returns_submission_ack_without_final_response(monkeypatch, capsys) -> None:
+    runtime = _Runtime()
+
+    def submit(*args, **kwargs):
+        raise BrowserNativeSubmissionAcknowledged(
+            SimpleNamespace(
+                conversation_id="conversation-1",
+                response_status=202,
+                elapsed_ms=37,
+            )
+        )
+
+    runtime.send_text_observed = submit
+    monkeypatch.setattr(cli, "assemble_product_runtime", lambda **kwargs: runtime)
+
+    code = cli.main([
+        "send",
+        "continue",
+        "--conversation",
+        "conversation-1",
+        "--submit-only",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload == {
+        "ok": True,
+        "submitted": True,
+        "conversation_id": "conversation-1",
+        "backend_status": 202,
+        "elapsed_ms": 37,
+    }
