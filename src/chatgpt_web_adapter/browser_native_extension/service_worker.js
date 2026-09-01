@@ -180,7 +180,7 @@ async function queryComposerReadiness(debuggee) {
           const rect = el.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         });
-      if (!composer) return { ready: false, reason: 'composer_missing' };
+      if (!composer) return { ready: false, state: 'UNKNOWN', reason: 'composer_missing' };
 
       const stopSelectors = [
         '[data-testid="stop-button"]',
@@ -199,6 +199,7 @@ async function queryComposerReadiness(debuggee) {
         composer.disabled === true;
       return {
         ready: !stopVisible && !busy,
+        state: stopVisible || busy ? 'GENERATING' : 'READY_FOR_INPUT',
         reason: stopVisible ? 'generation_control_visible' : (busy ? 'composer_busy' : 'ready')
       };
     })()`,
@@ -388,7 +389,7 @@ async function submitOfficialPageTurn(debuggee, timeoutMs) {
   }
 }
 
-async function executeOfficialPageTurn({ tabId, text, timeoutMs }) {
+async function executeOfficialPageTurn({ tabId, text, timeoutMs, onUiState = null }) {
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
   if (typeof text !== "string" || !text.trim()) throw new Error("TEXT_REQUIRED");
   if (text.length > 200_000) throw new Error("TEXT_TOO_LARGE_FOR_BROWSER_NATIVE_TURN");
@@ -416,6 +417,8 @@ async function executeOfficialPageTurn({ tabId, text, timeoutMs }) {
 
   let attached = false;
   let eventListener = null;
+  let uiProbeTimer = null;
+  let lastUiState = null;
   try {
     await chrome.debugger.attach(debuggee, CDP_PROTOCOL_VERSION);
     attached = true;
@@ -488,6 +491,27 @@ async function executeOfficialPageTurn({ tabId, text, timeoutMs }) {
     ]);
     diagnostics.submitAckMs = elapsedMs(submitStartedAt);
 
+    const reportUiState = async () => {
+      if (typeof onUiState !== "function") return;
+      try {
+        const state = await queryComposerReadiness(debuggee);
+        const normalized = state?.state === "GENERATING" || state?.state === "READY_FOR_INPUT"
+          ? state.state
+          : "UNKNOWN";
+        if (normalized === lastUiState) return;
+        lastUiState = normalized;
+        onUiState({ state: normalized, reason: state?.reason || "unknown" });
+      } catch {
+        if (lastUiState === "UNKNOWN") return;
+        lastUiState = "UNKNOWN";
+        onUiState({ state: "UNKNOWN", reason: "ui_state_probe_failed" });
+      }
+    };
+    await reportUiState();
+    if (typeof onUiState === "function") {
+      uiProbeTimer = setInterval(() => { reportUiState(); }, 1000);
+    }
+
     const requestId = await Promise.race([
       completed,
       new Promise((_, reject) => setTimeout(
@@ -519,6 +543,7 @@ async function executeOfficialPageTurn({ tabId, text, timeoutMs }) {
       turnExchangeId: safeMetadata.turnExchangeId
     };
   } finally {
+    if (uiProbeTimer !== null) clearInterval(uiProbeTimer);
     if (eventListener) chrome.debugger.onEvent.removeListener(eventListener);
     if (attached) {
       try {
@@ -548,10 +573,24 @@ async function executeNativeTurn(message) {
 
   const tab = await ensureRuntimeTab(conversationId);
   if (!Number.isInteger(tab.id)) throw new Error("CHATGPT_RUNTIME_TAB_MISSING_ID");
+  const onUiState = message.streamTextObservations === true
+    ? (state) => postNative({
+        protocol: BRIDGE_PROTOCOL_VERSION,
+        type: "turn_event",
+        request_id: message.request_id,
+        event: {
+          schema: 1,
+          type: "browser_ui_state",
+          state: state?.state || "UNKNOWN",
+          reason: state?.reason || "unknown"
+        }
+      })
+    : null;
   const result = await executeOfficialPageTurn({
     tabId: tab.id,
     text: message.text,
-    timeoutMs
+    timeoutMs,
+    onUiState
   });
   const resolvedConversationId = result.conversationId || conversationId;
   if (!resolvedConversationId) throw new Error("CHATGPT_TURN_MISSING_CONVERSATION_ID");

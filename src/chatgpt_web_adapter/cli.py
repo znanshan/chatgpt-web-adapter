@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -33,6 +34,7 @@ from .standalone_send import (
     STANDALONE_MODEL_PROFILES,
     RevisionSafeTerminalRenderer,
     normalize_standalone_model_profile,
+    write_bridge_ui_state,
 )
 
 
@@ -348,13 +350,20 @@ def _run_send(args: argparse.Namespace) -> int:
         if args.timings
         else None
     )
-    on_event = (
+    delegate_event = (
         timing_observer.on_event
         if timing_observer is not None
         else renderer.on_event
         if renderer is not None
         else None
     )
+
+    on_event = None
+    if delegate_event is not None or os.environ.get("CWA_BRIDGE_UI_STATE_FILE"):
+        def on_event(event: dict[str, Any]) -> None:
+            write_bridge_ui_state(event)
+            if delegate_event is not None:
+                delegate_event(event)
 
     execution = None
     try:

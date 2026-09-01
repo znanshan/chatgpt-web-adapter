@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 import sys
+import time
+from pathlib import Path
 from typing import Any, TextIO
 
 from .revision_safe_streaming_pr8_9 import (
@@ -17,6 +21,49 @@ from .revision_safe_streaming_pr8_9 import (
 
 DEFAULT_STANDALONE_MODEL_PROFILE = "DEEP"
 STANDALONE_MODEL_PROFILES: tuple[str, ...] = ("FAST", "BALANCED", "DEEP")
+
+
+def write_bridge_ui_state(event: dict[str, Any]) -> None:
+    """Persist a redacted latest browser composer state for Bridge supervision."""
+    if not isinstance(event, dict):
+        return
+    destination = os.environ.get("CWA_BRIDGE_UI_STATE_FILE")
+    if not destination:
+        return
+    event_type = event.get("type")
+    state = event.get("state")
+    if event_type == "browser_ui_state" and state not in {"GENERATING", "READY_FOR_INPUT", "UNKNOWN"}:
+        return
+    path = Path(destination)
+    existing: dict[str, Any] = {}
+    try:
+        existing_payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(existing_payload, dict):
+            existing = existing_payload
+    except (OSError, ValueError):
+        pass
+    if event_type != "browser_ui_state":
+        existing["activity_sequence"] = int(existing.get("activity_sequence") or 0) + 1
+        existing["last_activity_type"] = event_type if isinstance(event_type, str) else None
+    payload = {
+        "schema": 1,
+        "state": state if event_type == "browser_ui_state" else existing.get("state"),
+        "reason": (
+            event.get("reason") if isinstance(event.get("reason"), str)
+            else existing.get("reason")
+        ),
+        "observed_at": time.time(),
+        "activity_sequence": int(existing.get("activity_sequence") or 0),
+        "last_activity_type": existing.get("last_activity_type"),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        # Diagnostics must never affect the already-authorized product write.
+        return
 
 
 def normalize_standalone_model_profile(value: str) -> str:
