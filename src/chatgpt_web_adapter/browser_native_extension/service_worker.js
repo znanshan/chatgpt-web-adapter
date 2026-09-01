@@ -382,11 +382,12 @@ async function submitOfficialPageTurn(debuggee, timeoutMs) {
     );
     await clickSendButton(debuggee, point);
     return { strategy: "send_button_click", selector: point.selector };
-  } catch {
-    // Keep the proven PR8.0 keyboard path as a bounded fallback.
-    await locateAndFocusComposer(debuggee);
-    await submitWithEnter(debuggee);
-    return { strategy: "enter_fallback", selector: null };
+  } catch (error) {
+    // No commit action has occurred if the visible Send control was not
+    // acquired. Raw Enter is ambiguous (it may send or insert a newline), so
+    // fail with explicit pre-commit evidence and let Bridge refresh/retry.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`CHATGPT_SEND_BUTTON_NOT_READY_BEFORE_COMMIT:${detail}`);
   }
 }
 

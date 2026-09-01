@@ -20,3 +20,20 @@ def test_extension_submit_only_returns_after_submit_ack_before_completion_wait()
     assert "_submitOnlyAcknowledgedPageTurn" in source
     assert "message?.submitOnly !== true" in source
     assert 'importScripts("service_worker_submit_only.js")' in entry
+
+
+def test_text_submit_never_falls_back_to_ambiguous_enter_commit() -> None:
+    worker = (
+        Path(__file__).parents[1]
+        / "src"
+        / "chatgpt_web_adapter"
+        / "browser_native_extension"
+        / "service_worker.js"
+    ).read_text(encoding="utf-8")
+    submit = worker[
+        worker.index("async function submitOfficialPageTurn") :
+        worker.index("async function executeOfficialPageTurn")
+    ]
+
+    assert "submitWithEnter" not in submit
+    assert "CHATGPT_SEND_BUTTON_NOT_READY_BEFORE_COMMIT" in submit
