@@ -34,3 +34,12 @@ def test_pr811_recovery_preserves_bridge_ui_state_observer() -> None:
     assert "onUiState = null" in recovery
     assert "reportUiState" in recovery
     assert "setInterval" in recovery
+
+
+def test_rich_input_layers_preserve_ui_observer_for_text_only_turns() -> None:
+    root = browser_native_extension_dir()
+    schema16 = (root / "service_worker_rich_input_schema16_repair_pr9_2.js").read_text(encoding="utf-8")
+    schema17 = (root / "service_worker_rich_input_schema17_repair_pr9_2.js").read_text(encoding="utf-8")
+
+    assert "_pr92Schema16PriorExecuteOfficialPageTurn(args)" in schema16
+    assert "_pr92Schema17PriorExecuteOfficialPageTurn(args)" in schema17

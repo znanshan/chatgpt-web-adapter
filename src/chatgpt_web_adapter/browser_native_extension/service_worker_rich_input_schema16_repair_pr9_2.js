@@ -68,14 +68,15 @@ function _pr92Schema16DispatchPostWriteDebuggerTeardown(debuggee) {
   } catch {}
 }
 
-async function _pr92Schema16ExecuteOfficialPageTurn({ tabId, text, timeoutMs }) {
+async function _pr92Schema16ExecuteOfficialPageTurn(args) {
+  const { tabId, text, timeoutMs } = args || {};
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
   if (typeof text !== "string" || !text.trim()) throw new Error("TEXT_REQUIRED");
   if (text.length > 200_000) throw new Error("TEXT_TOO_LARGE_FOR_BROWSER_NATIVE_TURN");
 
   const context = _pr92ActiveRichInputContext;
   if (context === null) {
-    return _pr92Schema16PriorExecuteOfficialPageTurn({ tabId, text, timeoutMs });
+    return _pr92Schema16PriorExecuteOfficialPageTurn(args);
   }
 
   const startedAt = performance.now();
