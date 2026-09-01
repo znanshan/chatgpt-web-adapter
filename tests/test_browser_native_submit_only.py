@@ -16,5 +16,7 @@ def test_extension_submit_only_returns_after_submit_ack_before_completion_wait()
     assert "Network.loadingFinished" not in source
     assert "CHATGPT_TURN_TIMEOUT" not in source
     assert "diagnostics.submitAckMs = elapsedMs(submitStartedAt);" in source
+    assert "CWA_SUBMIT_ONLY_ACKNOWLEDGED" in source
+    assert "_submitOnlyAcknowledgedPageTurn" in source
     assert "message?.submitOnly !== true" in source
     assert 'importScripts("service_worker_submit_only.js")' in entry

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from chatgpt_web_adapter.browser_native_client import send_browser_native
+import pytest
+
+from chatgpt_web_adapter.browser_native_client import (
+    BrowserNativeSubmissionAcknowledged,
+    browser_native_submit_only_scope,
+    send_browser_native,
+)
 from chatgpt_web_adapter.browser_native_provider import BrowserNativeTurnResult
 from chatgpt_web_adapter.types import ChatConversation
 
@@ -10,6 +16,7 @@ from chatgpt_web_adapter.types import ChatConversation
 class FakeProvider:
     def __init__(self) -> None:
         self.normal_calls = []
+        self.submit_calls = []
 
     def send_text(self, text, *, conversation=None, timeout=None):
         self.normal_calls.append((text, conversation, timeout))
@@ -22,6 +29,19 @@ class FakeProvider:
             tab_id=17,
             tab_was_active=False,
             elapsed_ms=500,
+        )
+
+    def submit_text(self, text, *, conversation=None, timeout=None):
+        self.submit_calls.append((text, conversation, timeout))
+        return BrowserNativeTurnResult(
+            conversation_id="conversation-1",
+            turn_exchange_id=None,
+            response_status=202,
+            response_mime_type=None,
+            final_url="https://chatgpt.com/c/conversation-1",
+            tab_id=17,
+            tab_was_active=False,
+            elapsed_ms=25,
         )
 
 
@@ -74,6 +94,8 @@ def _client(provider, *, status_value="completed"):
 
         def __init__(self) -> None:
             self.events = []
+            self.status_calls = 0
+            self.message_calls = 0
             self.status_values = (
                 list(status_value)
                 if isinstance(status_value, (list, tuple))
@@ -84,6 +106,7 @@ def _client(provider, *, status_value="completed"):
             self.events.append((event_type, payload))
 
         def get_status(self, conversation):
+            self.status_calls += 1
             if self.status_values is not None:
                 value = self.status_values.pop(0) if self.status_values else "running"
             else:
@@ -91,6 +114,7 @@ def _client(provider, *, status_value="completed"):
             return SimpleNamespace(status=value)
 
         def get_messages(self, conversation, **kwargs):
+            self.message_calls += 1
             if conversation == "existing-conversation":
                 return [old]
             return [old, final]
@@ -102,6 +126,23 @@ def _client(provider, *, status_value="completed"):
             )
 
     return Client()
+
+
+def test_submit_only_does_not_read_canonical_before_page_submission() -> None:
+    provider = FakeProvider()
+    client = _client(provider, status_value=RuntimeError("must not be read"))
+
+    with browser_native_submit_only_scope(), pytest.raises(BrowserNativeSubmissionAcknowledged):
+        send_browser_native(
+            client,
+            "continue",
+            conversation="existing-conversation",
+            timeout=2,
+        )
+
+    assert client.status_calls == 0
+    assert client.message_calls == 0
+    assert provider.submit_calls == [("continue", "existing-conversation", 2)]
 
 
 def test_client_returns_canonical_readback_not_native_body() -> None:

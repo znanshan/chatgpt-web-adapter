@@ -283,14 +283,14 @@ def send_browser_native(
         )
 
     started = time.monotonic()
+    submit_only = _SUBMIT_ONLY.get()
     baseline_assistant_ids: set[str] = set()
     is_continuation = conversation is not None
     canonical_status_before_turn = None
-    if conversation is not None:
+    if conversation is not None and not submit_only:
         baseline_assistant_ids = _assistant_message_ids(self, conversation)
         canonical_status_before_turn = _canonical_status_value(self, conversation)
 
-    submit_only = _SUBMIT_ONLY.get()
     recovery_send = getattr(provider, "send_text_with_stale_ui_recovery", None)
     recovery_stream_send = getattr(
         provider, "send_text_with_stale_ui_recovery_streaming", None

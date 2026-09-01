@@ -2,6 +2,7 @@
 // Reply generation is owned by the persistent page observer, not this request.
 
 const _submitOnlyPriorExecuteNativeTurn = executeNativeTurn;
+let _submitOnlyAcknowledgedPageTurn = null;
 
 async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
@@ -68,12 +69,16 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     diagnostics.submitAckMs = elapsedMs(submitStartedAt);
     diagnostics.elapsedMs = elapsedMs(startedAt);
     const finalTab = await chrome.tabs.get(tabId);
-    return {
+    _submitOnlyAcknowledgedPageTurn = {
       diagnostics,
       finalUrl: finalTab.url || "",
       conversationId: conversationIdFromUrl(finalTab.url || ""),
       turnExchangeId: null
     };
+    // Abort the inherited completion/post-processing chain. Returning here is
+    // insufficient because several historical wrappers perform their own
+    // completion waits after executeOfficialPageTurn resolves.
+    throw new Error("CWA_SUBMIT_ONLY_ACKNOWLEDGED");
   } finally {
     if (eventListener) chrome.debugger.onEvent.removeListener(eventListener);
     if (attached) {
@@ -88,10 +93,28 @@ executeNativeTurn = async function _executeNativeTurnWithSubmitOnly(message) {
     throw new Error("BROWSER_NATIVE_SUBMIT_ONLY_RICH_INPUT_UNSUPPORTED");
   }
   const priorPageTurn = executeOfficialPageTurn;
+  _submitOnlyAcknowledgedPageTurn = null;
   executeOfficialPageTurn = _executeSubmitOnlyPageTurn;
   try {
     return await _submitOnlyPriorExecuteNativeTurn(message);
+  } catch (error) {
+    const acknowledged = _submitOnlyAcknowledgedPageTurn;
+    if (acknowledged === null) throw error;
+    const tabId = acknowledged.diagnostics.tabId;
+    return {
+      conversationId: acknowledged.conversationId,
+      turnExchangeId: null,
+      responseStatus: 202,
+      responseMimeType: null,
+      finalUrl: acknowledged.finalUrl,
+      tabId,
+      tabWasActive: acknowledged.diagnostics.tabWasActive,
+      elapsedMs: acknowledged.diagnostics.elapsedMs,
+      submitStrategy: acknowledged.diagnostics.submitStrategy,
+      submitAckMs: acknowledged.diagnostics.submitAckMs
+    };
   } finally {
+    _submitOnlyAcknowledgedPageTurn = null;
     executeOfficialPageTurn = priorPageTurn;
   }
 };
