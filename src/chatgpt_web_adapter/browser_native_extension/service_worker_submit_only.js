@@ -4,6 +4,51 @@
 const _submitOnlyPriorExecuteNativeTurn = executeNativeTurn;
 let _submitOnlyAcknowledgedPageTurn = null;
 
+async function _submitOnlyLocalSnapshot(debuggee) {
+  const result = await sendCommand(debuggee, "Runtime.evaluate", {
+    expression: `(() => {
+      const composer = document.querySelector('#prompt-textarea') ||
+        document.querySelector('[contenteditable="true"]') ||
+        document.querySelector('textarea[placeholder]');
+      const text = composer ? String(composer.innerText ?? composer.value ?? '').trim() : null;
+      const turns = document.querySelectorAll('main [data-testid^="conversation-turn-"], main article').length;
+      const stop = document.querySelector('button[data-testid="stop-button"], button[aria-label="Stop generating"]');
+      return { composerText: text, turnCount: turns, generating: Boolean(stop) };
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
+  });
+  return result?.result?.value || { composerText: null, turnCount: null, generating: false };
+}
+
+async function _submitOnlyWaitForAckOrGeneration(requestSeen, debuggee, timeoutMs) {
+  const deadline = performance.now() + Math.max(1, timeoutMs);
+  while (performance.now() < deadline) {
+    const winner = await Promise.race([
+      requestSeen.then(() => "network"),
+      sleep(Math.min(100, Math.max(1, deadline - performance.now()))).then(() => null)
+    ]);
+    if (winner === "network") return winner;
+    const snapshot = await _submitOnlyLocalSnapshot(debuggee);
+    if (snapshot.generating === true) return "local_generation";
+  }
+  return null;
+}
+
+async function _submitOnlyClickStableSelector(debuggee, selector) {
+  const result = await sendCommand(debuggee, "Runtime.evaluate", {
+    expression: `(() => {
+      const button = document.querySelector(${JSON.stringify(selector)});
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      button.click();
+      return true;
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
+  });
+  return result?.result?.value === true;
+}
+
 async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
   if (typeof text !== "string" || !text.trim()) throw new Error("TEXT_REQUIRED");
@@ -52,6 +97,7 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     diagnostics.composerStrategy = await locateAndFocusComposer(debuggee);
     await clearComposer(debuggee);
     await sendCommand(debuggee, "Input.insertText", { text });
+    const preSubmitSnapshot = await _submitOnlyLocalSnapshot(debuggee);
     const submitStartedAt = performance.now();
     const submit = await submitOfficialPageTurn(
       debuggee,
@@ -59,13 +105,41 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     );
     diagnostics.submitStrategy = submit.strategy;
     diagnostics.submitButtonSelector = submit.selector;
-    await Promise.race([
-      requestSeen,
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error(`CHATGPT_SUBMIT_NOT_OBSERVED:${submit.strategy}`)),
-        Math.min(remainingMs(startedAt, timeoutMs), DEFAULT_SUBMIT_ACK_TIMEOUT_MS)
-      ))
-    ]);
+    const ackBudget = Math.min(remainingMs(startedAt, timeoutMs), DEFAULT_SUBMIT_ACK_TIMEOUT_MS);
+    let acknowledgement = await _submitOnlyWaitForAckOrGeneration(
+      requestSeen, debuggee, ackBudget
+    );
+    if (acknowledgement === null) {
+      let after = await _submitOnlyLocalSnapshot(debuggee);
+      const exactTextRetained = after.composerText === text.trim();
+      const turnCountUnchanged = after.turnCount === preSubmitSnapshot.turnCount;
+      if (
+        exactTextRetained && turnCountUnchanged && after.generating !== true &&
+        typeof submit.selector === "string" && submit.selector &&
+        await _submitOnlyClickStableSelector(debuggee, submit.selector)
+      ) {
+        acknowledgement = await _submitOnlyWaitForAckOrGeneration(
+          requestSeen, debuggee,
+          Math.min(remainingMs(startedAt, timeoutMs), DEFAULT_SUBMIT_ACK_TIMEOUT_MS)
+        );
+        after = await _submitOnlyLocalSnapshot(debuggee);
+      }
+      if (acknowledgement === null) {
+        const noCommitProven = (
+          after.composerText === text.trim() &&
+          after.turnCount === preSubmitSnapshot.turnCount &&
+          after.generating !== true
+        );
+        if (noCommitProven) {
+          throw new Error(`CHATGPT_SUBMIT_NOT_COMMITTED_LOCAL_PROOF:${submit.strategy}`);
+        }
+        if (after.generating === true || after.turnCount > preSubmitSnapshot.turnCount) {
+          acknowledgement = "local_turn_evidence";
+        } else {
+          throw new Error(`CHATGPT_SUBMIT_NOT_OBSERVED:${submit.strategy}`);
+        }
+      }
+    }
     diagnostics.submitAckMs = elapsedMs(submitStartedAt);
     diagnostics.elapsedMs = elapsedMs(startedAt);
     const finalTab = await chrome.tabs.get(tabId);
