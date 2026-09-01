@@ -16,6 +16,7 @@ def test_native_worker_reports_ready_and_generating_ui_states() -> None:
     assert '"READY_FOR_INPUT"' in source
     assert '"GENERATING"' in source
     assert "onUiState" in source
+    assert '[contenteditable="true"]' in source
 
 
 def test_bridge_ui_state_sink_writes_only_safe_state_fields(tmp_path: Path, monkeypatch) -> None:
