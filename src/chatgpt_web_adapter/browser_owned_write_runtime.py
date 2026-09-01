@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 import threading
 import time
 from typing import Any, Callable
@@ -244,6 +245,13 @@ class BrowserOwnedProductWriteRuntime:
         self._last_browser_authority_lease: BrowserAuthorityLease | None = None
         self._last_turn_lifecycle: TurnLifecycle | None = None
         self._last_disposal_result: dict[str, Any] | None = None
+        # Bridge enables this only after an independent browser UI probe has
+        # proved the composer is input-ready and the previous supervisor is
+        # stale.  It lets a continuation proceed when canonical status lags
+        # behind the page-owned UI after a browser restart.
+        self._allow_ui_ready_continuation = os.environ.get(
+            "CWA_BRIDGE_UI_READY_CONTINUATION"
+        ) == "1"
 
     def health(
         self,
@@ -308,7 +316,9 @@ class BrowserOwnedProductWriteRuntime:
                 canonical_read_checked=True,
             )
 
-        if canonical_status != "completed":
+        if canonical_status != "completed" and not (
+            self._allow_ui_ready_continuation and canonical_status is not None
+        ):
             return BrowserOwnedWriteRuntimeHealth(
                 ready=False,
                 reason=CONVERSATION_NOT_COMPLETED,
@@ -605,7 +615,11 @@ class BrowserOwnedProductWriteRuntime:
             )
 
         preflight = self.health(conversation)
-        if not preflight.ready:
+        if not preflight.ready and not (
+            self._allow_ui_ready_continuation
+            and preflight.reason == CONVERSATION_NOT_COMPLETED
+            and preflight.canonical_status is not None
+        ):
             raise BrowserOwnedWriteRuntimeError(
                 f"browser-owned write preflight failed: {preflight.reason}",
                 failure_kind=preflight.reason,
@@ -632,7 +646,9 @@ class BrowserOwnedProductWriteRuntime:
                     cause=error,
                     request_stage="browser_owned_write_preflight",
                 ) from error
-            if commit_status != "completed":
+            if commit_status != "completed" and not (
+                self._allow_ui_ready_continuation and commit_status is not None
+            ):
                 raise BrowserOwnedWriteRuntimeError(
                     f"browser-owned write commit check failed: canonical status={commit_status}",
                     failure_kind=CONVERSATION_NOT_COMPLETED,
