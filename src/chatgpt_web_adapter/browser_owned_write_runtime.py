@@ -17,6 +17,8 @@ from .browser_authority_lease import (
 )
 from .browser_native_client import (
     BrowserNativeSubmissionAcknowledged,
+    browser_native_submit_only_enabled,
+    browser_native_submit_only_scope,
     send_browser_native,
     set_browser_native_turn_provider,
 )
@@ -618,25 +620,27 @@ class BrowserOwnedProductWriteRuntime:
                 request_stage="browser_authority_policy",
             )
 
-        preflight = self.health(conversation)
-        if not preflight.ready and not (
-            self._allow_ui_ready_continuation
-            and preflight.reason == CONVERSATION_NOT_COMPLETED
-            and preflight.canonical_status is not None
-        ):
-            raise BrowserOwnedWriteRuntimeError(
-                f"browser-owned write preflight failed: {preflight.reason}",
-                failure_kind=preflight.reason,
-                automatic_retry_allowed=False,
-                manual_retry_safe_after_repair=True,
-                write_may_have_been_submitted=False,
-                reconciliation_required=False,
-                request_stage="browser_owned_write_preflight",
-            )
+        submit_only = browser_native_submit_only_enabled()
+        if not submit_only:
+            preflight = self.health(conversation)
+            if not preflight.ready and not (
+                self._allow_ui_ready_continuation
+                and preflight.reason == CONVERSATION_NOT_COMPLETED
+                and preflight.canonical_status is not None
+            ):
+                raise BrowserOwnedWriteRuntimeError(
+                    f"browser-owned write preflight failed: {preflight.reason}",
+                    failure_kind=preflight.reason,
+                    automatic_retry_allowed=False,
+                    manual_retry_safe_after_repair=True,
+                    write_may_have_been_submitted=False,
+                    reconciliation_required=False,
+                    request_stage="browser_owned_write_preflight",
+                )
 
         # Commit-point recheck for continuation turns. Health is advisory and a
         # conversation can transition between the first read and delegation.
-        if conversation is not None:
+        if conversation is not None and not submit_only:
             try:
                 commit_status = _canonical_status_value(self.client, conversation)
             except Exception as error:

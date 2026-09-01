@@ -42,6 +42,10 @@ def browser_native_submit_only_scope():
         _SUBMIT_ONLY.reset(token)
 
 
+def browser_native_submit_only_enabled() -> bool:
+    return _SUBMIT_ONLY.get()
+
+
 def set_browser_native_turn_provider(self: Any, provider: BrowserNativeTurnProvider | None) -> None:
     if provider is not None and not callable(getattr(provider, "send_text", None)):
         raise TypeError("provider must expose a callable send_text() or be None")

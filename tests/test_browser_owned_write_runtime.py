@@ -27,8 +27,10 @@ class FakeClient:
         self.status_value = status
         self.status_values = list(status) if isinstance(status, (list, tuple)) else None
         self._browser_native_turn_provider = None
+        self.status_calls = 0
 
     def get_status(self, conversation):
+        self.status_calls += 1
         value = self.status_values.pop(0) if self.status_values is not None and self.status_values else self.status_value
         if isinstance(value, BaseException):
             raise value
@@ -123,6 +125,18 @@ def test_success_delegates_exactly_once(monkeypatch) -> None:
     assert len(calls) == 1
     assert calls[0][0][1] == "hello"
     assert calls[0][1]["timeout"] == 12
+
+
+def test_submit_only_uses_bridge_preflight_without_duplicate_canonical_reads(monkeypatch) -> None:
+    expected = SimpleNamespace(text="unused")
+    monkeypatch.setattr(subject, "send_browser_native", lambda *a, **k: expected)
+    rt = runtime(status=RuntimeError("canonical read must not run"))
+
+    with subject.browser_native_submit_only_scope():
+        result = rt.send_text("continue", conversation="conversation-1")
+
+    assert result is expected
+    assert rt.client.status_calls == 0
 
 
 def test_readback_timeout_is_accepted_but_incomplete(monkeypatch) -> None:
