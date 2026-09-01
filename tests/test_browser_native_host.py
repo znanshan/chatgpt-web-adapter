@@ -25,3 +25,9 @@ def test_broker_rejects_wrong_local_token_and_answers_ping(tmp_path) -> None:
         assert allowed["extensionConnected"] is False
     finally:
         broker.close()
+
+
+def test_turn_timeout_budget_is_not_artificially_capped_at_five_minutes() -> None:
+    from chatgpt_web_adapter.browser_native_host import MAX_TURN_TIMEOUT_SECONDS
+
+    assert MAX_TURN_TIMEOUT_SECONDS >= 1800

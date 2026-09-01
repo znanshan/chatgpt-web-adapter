@@ -107,7 +107,8 @@ async function _pr811MaybeRecoverStaleRuntimeUi(message) {
 executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTerminalBoundary({
   tabId,
   text,
-  timeoutMs
+  timeoutMs,
+  onUiState = null
 }) {
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
   if (typeof text !== "string" || !text.trim()) throw new Error("TEXT_REQUIRED");
@@ -141,6 +142,7 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
 
   let attached = false;
   let eventListener = null;
+  let uiProbeTimer = null;
   try {
     await chrome.debugger.attach(debuggee, CDP_PROTOCOL_VERSION);
     attached = true;
@@ -212,6 +214,27 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
       ))
     ]);
     diagnostics.submitAckMs = elapsedMs(submitStartedAt);
+
+    // Keep the redacted UI-state sidecar alive through the effective recovery
+    // implementation.  This wrapper replaces the core page-turn function in
+    // the installed chain, so dropping onUiState here makes Bridge observe
+    // activity events but never learn that the composer returned to input.
+    const reportUiState = async () => {
+      if (typeof onUiState !== "function") return;
+      try {
+        const state = await queryComposerReadiness(debuggee);
+        const normalized = state?.state === "GENERATING" || state?.state === "READY_FOR_INPUT"
+          ? state.state
+          : "UNKNOWN";
+        onUiState({ state: normalized, reason: state?.reason || "unknown" });
+      } catch {
+        onUiState({ state: "UNKNOWN", reason: "ui_state_probe_failed" });
+      }
+    };
+    await reportUiState();
+    if (typeof onUiState === "function") {
+      uiProbeTimer = setInterval(() => { reportUiState(); }, 1000);
+    }
 
     const earlySignalPromise = _cwaOfficialPageEarlyCompletionSignalPromise;
     const timeoutResult = new Promise((_, reject) => setTimeout(
@@ -289,6 +312,7 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
       turnExchangeId: safeMetadata.turnExchangeId
     };
   } finally {
+    if (uiProbeTimer !== null) clearInterval(uiProbeTimer);
     if (eventListener) chrome.debugger.onEvent.removeListener(eventListener);
     if (attached) {
       try {

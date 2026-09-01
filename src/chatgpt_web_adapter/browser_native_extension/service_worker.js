@@ -3,6 +3,7 @@ const HOST_NAME = "com.kymuco.chatgpt_web_adapter";
 const BRIDGE_PROTOCOL_VERSION = 1;
 const CDP_PROTOCOL_VERSION = "1.3";
 const DEFAULT_TIMEOUT_MS = 150_000;
+const MAX_TURN_TIMEOUT_MS = 1_800_000;
 const DEFAULT_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SUBMIT_READY_TIMEOUT_MS = 10_000;
 const DEFAULT_SUBMIT_ACK_TIMEOUT_MS = 10_000;
@@ -568,7 +569,7 @@ async function executeNativeTurn(message) {
     ? message.conversationId.trim()
     : null;
   const timeoutMs = Number.isFinite(message.timeoutMs)
-    ? Math.max(10_000, Math.min(Number(message.timeoutMs), 300_000))
+    ? Math.max(10_000, Math.min(Number(message.timeoutMs), MAX_TURN_TIMEOUT_MS))
     : DEFAULT_TIMEOUT_MS;
 
   const tab = await ensureRuntimeTab(conversationId);

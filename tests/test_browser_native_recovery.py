@@ -21,3 +21,16 @@ def test_pr811_recovery_worker_is_packaged() -> None:
     assert "canonicalCompletedAtMs" in recovery
     assert "runtimeReloaded" in recovery
     assert "runtimeReloadMs" in recovery
+
+
+def test_pr811_recovery_preserves_bridge_ui_state_observer() -> None:
+    root = browser_native_extension_dir()
+    recovery = (root / "service_worker_recovery.js").read_text(encoding="utf-8")
+
+    # The recovery implementation is the effective page-turn implementation
+    # in the installed chain. It must keep the callback that writes the
+    # redacted UI state sidecar; otherwise Bridge cannot distinguish a dead
+    # stream from a still-generating page.
+    assert "onUiState = null" in recovery
+    assert "reportUiState" in recovery
+    assert "setInterval" in recovery

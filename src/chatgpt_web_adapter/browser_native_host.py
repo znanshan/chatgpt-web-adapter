@@ -20,6 +20,8 @@ from .browser_native_protocol import (
     write_native_message,
 )
 
+MAX_TURN_TIMEOUT_SECONDS = 1800.0
+
 
 class _BrokerServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
@@ -164,9 +166,10 @@ class BrowserNativeBroker:
         try:
             timeout_ms = request.get("timeoutMs")
             default_timeout_ms = 120_000 if operation == "turn" else 10_000
+            max_timeout = MAX_TURN_TIMEOUT_SECONDS if operation == "turn" else 300.0
             timeout = max(
                 1.0,
-                min(float(timeout_ms or default_timeout_ms) / 1000.0, 300.0),
+                min(float(timeout_ms or default_timeout_ms) / 1000.0, max_timeout),
             )
             waiter: queue.Queue[dict[str, Any]] = queue.Queue()
             with self.pending_lock:
