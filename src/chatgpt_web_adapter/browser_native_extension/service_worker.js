@@ -170,7 +170,7 @@ async function queryComposerReadiness(debuggee) {
     expression: `(() => {
       const selectors = [
         '#prompt-textarea',
-        '[contenteditable="true"][data-lexical-editor="true"]',
+        '[contenteditable="true"]',
         'textarea[placeholder]'
       ];
       const composer = selectors
@@ -260,7 +260,7 @@ async function locateAndFocusComposer(debuggee) {
     expression: `(() => {
       const selectors = [
         '#prompt-textarea',
-        '[contenteditable="true"][data-lexical-editor="true"]',
+        '[contenteditable="true"]',
         'textarea[placeholder]'
       ];
       for (const selector of selectors) {
