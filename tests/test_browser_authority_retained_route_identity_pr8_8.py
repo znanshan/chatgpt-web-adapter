@@ -207,8 +207,8 @@ def make_runner():
 def test_extension_route_layer_is_additive_and_read_only():
     root = browser_native_extension_dir()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.1.18"
-    assert manifest["background"]["service_worker"] == "service_worker_entry_v2.js"
+    assert manifest["version"] == "0.1.19"
+    assert manifest["background"]["service_worker"] == "service_worker_entry_v3.js"
 
     observability = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     route_worker = (root / "service_worker_retained_route_identity_pr8_8.js").read_text(encoding="utf-8")

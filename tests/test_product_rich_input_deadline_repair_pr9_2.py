@@ -9,7 +9,7 @@ from chatgpt_web_adapter.product_runtime import _known_browser_owned_rich_input_
 ROOT = Path(__file__).resolve().parents[1]
 EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 REPAIR = EXT / "service_worker_rich_input_deadline_repair_pr9_2.js"
-ENTRYPOINT = EXT / "service_worker_entry_v2.js"
+ENTRYPOINT = EXT / "service_worker_entry_v3.js"
 
 
 def test_deadline_repair_overlay_is_loaded_after_primary_rich_input_overlay():

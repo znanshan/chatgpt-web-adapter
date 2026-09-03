@@ -10,8 +10,8 @@ def test_temporary_probe_is_layered_above_reconciled_worker() -> None:
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     worker_name = manifest["background"]["service_worker"]
 
-    assert manifest["version"] == "0.1.18"
-    assert worker_name == "service_worker_entry_v2.js"
+    assert manifest["version"] == "0.1.19"
+    assert worker_name == "service_worker_entry_v3.js"
 
     route_worker = (root / worker_name).read_text(encoding="utf-8")
     assert 'importScripts("service_worker_temporary_chat_manual_ground_truth.js")' in route_worker
@@ -240,7 +240,7 @@ def test_manual_temporary_ground_truth_requires_visible_page_turn_evidence() -> 
 
 def test_temporary_route_reopen_probe_is_explicit_read_only_and_settled() -> None:
     root = browser_native_extension_dir()
-    worker = (root / "service_worker_entry_v2.js").read_text(
+    worker = (root / "service_worker_entry_v3.js").read_text(
         encoding="utf-8"
     )
 

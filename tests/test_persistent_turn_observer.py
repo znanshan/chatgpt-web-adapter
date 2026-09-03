@@ -8,14 +8,14 @@ EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 
 
 def test_extension_installs_persistent_turn_observer_after_all_writer_layers() -> None:
-    assert '"version": "0.1.18"' in (EXT / "manifest.json").read_text(encoding="utf-8")
-    entry = (EXT / "service_worker_entry_v2.js").read_text(
+    assert '"version": "0.1.19"' in (EXT / "manifest.json").read_text(encoding="utf-8")
+    entry = (EXT / "service_worker_entry_v3.js").read_text(
         encoding="utf-8"
     )
     assert entry.rstrip().endswith(
-        'importScripts("service_worker_persistent_turn_observer_v2.js");'
+        'importScripts("service_worker_persistent_turn_observer_v3.js");'
     )
-    source = (EXT / "service_worker_persistent_turn_observer_v2.js").read_text(
+    source = (EXT / "service_worker_persistent_turn_observer_v3.js").read_text(
         encoding="utf-8"
     )
     assert "Network.streamResourceContent" in source
@@ -26,7 +26,7 @@ def test_extension_installs_persistent_turn_observer_after_all_writer_layers() -
     assert "DOM_SILENCE" not in source
     assert "browserAuthorityLeaseId" in source
     assert "page_generation_control_released" in source
-    assert "page_ready_after_observer_restart" in source
+    assert "page_ready_after_observer_rebind" in source
 
 
 def test_provider_reads_observation_without_submitting_or_canonical_read(tmp_path, monkeypatch) -> None:

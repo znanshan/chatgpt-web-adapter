@@ -1,4 +1,4 @@
-// Persistent page-owned turn observation v2.
+// Persistent page-owned turn observation v3.
 //
 // Submission and observation intentionally have different lifetimes. The
 // native writer returns after the official page has committed a conversation
@@ -308,7 +308,7 @@ async function _cwaObserveTurn(message) {
       ? stored[CWA_TURN_LEDGER_KEY] : [];
     record = rows.find((row) => row?.conversationId === requestedId) || null;
   }
-  if (record?.state === "RUNNING" && record.tabId !== tab.id) {
+  if (record && record.tabId !== tab.id) {
     const generating = await _cwaLocalUiState(tab.id);
     record = {
       ...record,
@@ -317,7 +317,7 @@ async function _cwaObserveTurn(message) {
       source: "LOCAL_UI_RECOVERY",
       lastEventAt: _cwaNow(),
       state: generating ? "RUNNING" : "COMPLETED",
-      terminalKind: generating ? null : "page_ready_after_observer_restart",
+      terminalKind: generating ? null : "page_ready_after_observer_rebind",
       terminalAt: generating ? null : _cwaNow(),
       failure: null
     };

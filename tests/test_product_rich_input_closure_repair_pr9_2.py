@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 CLOSURE = EXT / "service_worker_rich_input_closure_repair_pr9_2.js"
-ENTRYPOINT = EXT / "service_worker_entry_v2.js"
+ENTRYPOINT = EXT / "service_worker_entry_v3.js"
 
 
 def test_schema_6_closure_overlay_is_loaded_last():
