@@ -362,4 +362,5 @@ importScripts("service_worker_rich_input_closure_repair_pr9_2.js");
 // non-awaited post-click debugger acknowledgement, and session-bound fenced-tab
 // identity before destructive cleanup. Loaded last.
 importScripts("service_worker_rich_input_schema7_repair_pr9_2.js");
-importScripts("service_worker_submit_only.js");
+importScripts("service_worker_submit_only_v2.js");
+importScripts("service_worker_persistent_turn_observer_v2.js");

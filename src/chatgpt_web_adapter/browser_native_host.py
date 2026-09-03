@@ -154,7 +154,7 @@ class BrowserNativeBroker:
                 "runtimeTabId": self.runtime_tab_id,
             }
 
-        if operation not in {"turn", "release_runtime_tab"}:
+        if operation not in {"turn", "release_runtime_tab", "observe_turn"}:
             return {**base, "ok": False, "error": "BROWSER_NATIVE_UNKNOWN_OPERATION"}
         if not isinstance(request_id, str) or not request_id:
             return {**base, "ok": False, "error": "BROWSER_NATIVE_REQUEST_ID_REQUIRED"}

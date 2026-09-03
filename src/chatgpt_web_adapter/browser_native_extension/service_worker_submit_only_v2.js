@@ -1,8 +1,9 @@
-// Bridge submission boundary: type + click + observed official conversation POST.
+// Bridge submission boundary v2: type + one click + observed official conversation POST.
 // Reply generation is owned by the persistent page observer, not this request.
 
 const _submitOnlyPriorExecuteNativeTurn = executeNativeTurn;
 let _submitOnlyAcknowledgedPageTurn = null;
+const CWA_SUBMIT_COMMIT_OBSERVATION_MS = 2_000;
 
 async function _submitOnlyLocalSnapshot(debuggee) {
   const result = await sendCommand(debuggee, "Runtime.evaluate", {
@@ -35,20 +36,6 @@ async function _submitOnlyWaitForAckOrGeneration(requestSeen, debuggee, timeoutM
   return null;
 }
 
-async function _submitOnlyClickStableSelector(debuggee, selector) {
-  const result = await sendCommand(debuggee, "Runtime.evaluate", {
-    expression: `(() => {
-      const button = document.querySelector(${JSON.stringify(selector)});
-      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
-      button.click();
-      return true;
-    })()`,
-    returnByValue: true,
-    awaitPromise: true
-  });
-  return result?.result?.value === true;
-}
-
 async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
   if (!Number.isInteger(tabId)) throw new Error("TAB_ID_REQUIRED");
   if (typeof text !== "string" || !text.trim()) throw new Error("TEXT_REQUIRED");
@@ -75,8 +62,10 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
   let attached = false;
   let eventListener = null;
   try {
-    await chrome.debugger.attach(debuggee, CDP_PROTOCOL_VERSION);
-    attached = true;
+    if (!(globalThis._cwaPersistentObserverOwnsTab?.(tabId) === true)) {
+      await chrome.debugger.attach(debuggee, CDP_PROTOCOL_VERSION);
+      attached = true;
+    }
     await sendCommand(debuggee, "Network.enable");
     await sendCommand(debuggee, "Runtime.enable");
     await waitForComposerReady(
@@ -105,25 +94,12 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     );
     diagnostics.submitStrategy = submit.strategy;
     diagnostics.submitButtonSelector = submit.selector;
-    const ackBudget = Math.min(remainingMs(startedAt, timeoutMs), DEFAULT_SUBMIT_ACK_TIMEOUT_MS);
+    const ackBudget = Math.min(remainingMs(startedAt, timeoutMs), CWA_SUBMIT_COMMIT_OBSERVATION_MS);
     let acknowledgement = await _submitOnlyWaitForAckOrGeneration(
       requestSeen, debuggee, ackBudget
     );
     if (acknowledgement === null) {
       let after = await _submitOnlyLocalSnapshot(debuggee);
-      const exactTextRetained = after.composerText === text.trim();
-      const turnCountUnchanged = after.turnCount === preSubmitSnapshot.turnCount;
-      if (
-        exactTextRetained && turnCountUnchanged && after.generating !== true &&
-        typeof submit.selector === "string" && submit.selector &&
-        await _submitOnlyClickStableSelector(debuggee, submit.selector)
-      ) {
-        acknowledgement = await _submitOnlyWaitForAckOrGeneration(
-          requestSeen, debuggee,
-          Math.min(remainingMs(startedAt, timeoutMs), DEFAULT_SUBMIT_ACK_TIMEOUT_MS)
-        );
-        after = await _submitOnlyLocalSnapshot(debuggee);
-      }
       if (acknowledgement === null) {
         const noCommitProven = (
           after.composerText === text.trim() &&
@@ -185,7 +161,10 @@ executeNativeTurn = async function _executeNativeTurnWithSubmitOnly(message) {
       tabWasActive: acknowledged.diagnostics.tabWasActive,
       elapsedMs: acknowledged.diagnostics.elapsedMs,
       submitStrategy: acknowledged.diagnostics.submitStrategy,
-      submitAckMs: acknowledged.diagnostics.submitAckMs
+      submitAckMs: acknowledged.diagnostics.submitAckMs,
+      browserAuthorityLeaseId: typeof message.browserAuthorityLeaseId === "string"
+        ? message.browserAuthorityLeaseId : null,
+      attachmentCount: 0
     };
   } finally {
     _submitOnlyAcknowledgedPageTurn = null;

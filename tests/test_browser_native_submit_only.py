@@ -8,7 +8,7 @@ def test_extension_submit_only_returns_after_submit_ack_before_completion_wait()
         / "chatgpt_web_adapter"
         / "browser_native_extension"
     )
-    source = (extension / "service_worker_submit_only.js").read_text(encoding="utf-8")
+    source = (extension / "service_worker_submit_only_v2.js").read_text(encoding="utf-8")
     entry = (extension / "service_worker_temporary_chat_route_reopen_probe.js").read_text(
         encoding="utf-8"
     )
@@ -21,8 +21,10 @@ def test_extension_submit_only_returns_after_submit_ack_before_completion_wait()
     assert "message?.submitOnly !== true" in source
     assert "_submitOnlyWaitForAckOrGeneration" in source
     assert "CHATGPT_SUBMIT_NOT_COMMITTED_LOCAL_PROOF" in source
-    assert "_submitOnlyClickStableSelector" in source
-    assert 'importScripts("service_worker_submit_only.js")' in entry
+    assert "_submitOnlyClickStableSelector(debuggee" not in source
+    assert "CWA_SUBMIT_COMMIT_OBSERVATION_MS = 2_000" in source
+    assert "browserAuthorityLeaseId" in source
+    assert 'importScripts("service_worker_submit_only_v2.js")' in entry
 
 
 def test_text_submit_never_falls_back_to_ambiguous_enter_commit() -> None:
