@@ -8,8 +8,8 @@ EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 
 
 def test_extension_installs_persistent_turn_observer_after_all_writer_layers() -> None:
-    assert '"version": "0.1.17"' in (EXT / "manifest.json").read_text(encoding="utf-8")
-    entry = (EXT / "service_worker_temporary_chat_route_reopen_probe.js").read_text(
+    assert '"version": "0.1.18"' in (EXT / "manifest.json").read_text(encoding="utf-8")
+    entry = (EXT / "service_worker_entry_v2.js").read_text(
         encoding="utf-8"
     )
     assert entry.rstrip().endswith(

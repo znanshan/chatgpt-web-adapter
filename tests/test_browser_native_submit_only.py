@@ -9,7 +9,7 @@ def test_extension_submit_only_returns_after_submit_ack_before_completion_wait()
         / "browser_native_extension"
     )
     source = (extension / "service_worker_submit_only_v2.js").read_text(encoding="utf-8")
-    entry = (extension / "service_worker_temporary_chat_route_reopen_probe.js").read_text(
+    entry = (extension / "service_worker_entry_v2.js").read_text(
         encoding="utf-8"
     )
 
