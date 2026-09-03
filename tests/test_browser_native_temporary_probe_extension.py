@@ -10,7 +10,7 @@ def test_temporary_probe_is_layered_above_reconciled_worker() -> None:
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     worker_name = manifest["background"]["service_worker"]
 
-    assert manifest["version"] == "0.1.16"
+    assert manifest["version"] == "0.1.17"
     assert worker_name == "service_worker_temporary_chat_route_reopen_probe.js"
 
     route_worker = (root / worker_name).read_text(encoding="utf-8")

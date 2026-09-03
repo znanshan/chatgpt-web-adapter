@@ -160,8 +160,11 @@ class BrowserNativeBroker:
             return {**base, "ok": False, "error": "BROWSER_NATIVE_REQUEST_ID_REQUIRED"}
         if not self.extension_connected:
             return {**base, "ok": False, "error": "BROWSER_NATIVE_EXTENSION_NOT_CONNECTED"}
-        if not self.turn_lock.acquire(blocking=False):
-            return {**base, "ok": False, "error": "BROWSER_NATIVE_BRIDGE_BUSY"}
+        mutation_lock_acquired = False
+        if operation != "observe_turn":
+            mutation_lock_acquired = self.turn_lock.acquire(blocking=False)
+            if not mutation_lock_acquired:
+                return {**base, "ok": False, "error": "BROWSER_NATIVE_BRIDGE_BUSY"}
 
         try:
             timeout_ms = request.get("timeoutMs")
@@ -201,7 +204,8 @@ class BrowserNativeBroker:
                 with self.pending_lock:
                     self.pending.pop(request_id, None)
         finally:
-            self.turn_lock.release()
+            if mutation_lock_acquired:
+                self.turn_lock.release()
 
     def route_native_message(self, message: dict[str, Any]) -> None:
         if message.get("protocol") != PROTOCOL_VERSION:

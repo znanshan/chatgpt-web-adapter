@@ -31,3 +31,36 @@ def test_turn_timeout_budget_is_not_artificially_capped_at_five_minutes() -> Non
     from chatgpt_web_adapter.browser_native_host import MAX_TURN_TIMEOUT_SECONDS
 
     assert MAX_TURN_TIMEOUT_SECONDS >= 1800
+
+
+def test_observation_is_not_blocked_by_an_active_writer(monkeypatch, tmp_path) -> None:
+    import chatgpt_web_adapter.browser_native_host as subject
+
+    broker = BrowserNativeBroker(state_dir=tmp_path)
+    broker.extension_connected = True
+
+    def fake_write(stream, forwarded):
+        broker.route_native_message({
+            "protocol": 1,
+            "type": "turn_observation_result",
+            "request_id": forwarded["request_id"],
+            "ok": True,
+            "observation": {"state": "RUNNING"},
+        })
+
+    monkeypatch.setattr(subject, "write_native_message", fake_write)
+    broker.turn_lock.acquire()
+    try:
+        result = broker.handle_local_request({
+            "protocol": 1,
+            "token": broker.token,
+            "type": "observe_turn",
+            "request_id": "observe-while-writing",
+            "timeoutMs": 1000,
+        })
+    finally:
+        broker.turn_lock.release()
+        broker._server.server_close()
+
+    assert result["ok"] is True
+    assert result["observation"]["state"] == "RUNNING"
