@@ -7,6 +7,7 @@ from chatgpt_web_adapter.external_operation import (
     CursorTracker,
     ExternalOperationError,
     ExternalOperationEvent,
+    ExternalOperationStream,
     SequenceGap,
     cursor_for,
     normalize_sse_path,
@@ -96,3 +97,63 @@ def test_turn_complete_requires_sustained_quiescence() -> None:
     assert turn_is_complete(terminal_evidence=True, last_data_age_seconds=5.0, quiescence_window_seconds=3.0)
     # no terminal evidence -> never complete
     assert not turn_is_complete(terminal_evidence=False, last_data_age_seconds=99.0, quiescence_window_seconds=3.0)
+
+
+def test_stream_stays_running_while_data_arrives_after_conjunction() -> None:
+    """Finding 002: a conjunction marker with continuing data is not complete."""
+    now = {"ms": 1000.0}
+
+    def clock() -> float:
+        return now["ms"] / 1000.0
+
+    stream = ExternalOperationStream("op-1", quiescence_window_seconds=3.0, now=clock)
+    seq = 0
+
+    def emit(event_type: str, status: str = "running") -> None:
+        nonlocal seq
+        event = ExternalOperationEvent(
+            operation_id="op-1", event_seq=seq, source="network", event_type=event_type,
+            t_ms=int(now["ms"]), cursor=f"op-1:{seq}", status=status,
+        )
+        seq += 1
+        stream.ingest(event)
+
+    emit("turn_submitted")
+    emit("text_delta")
+    emit("end_turn", status="completed")  # conjunction marker
+    emit("text_delta")  # data keeps arriving
+    now["ms"] = 2000.0  # only 1 s after the last data
+    assert stream.status() == "running"  # NOT complete yet
+
+    now["ms"] = 7000.0  # 5 s of silence after the last data
+    assert stream.status() == "completed"
+    result = stream.result()
+    assert result["status"] == "completed"
+    assert result["terminal_markers"] >= 1
+
+
+def test_stream_fails_closed_on_failure_events() -> None:
+    stream = ExternalOperationStream("op-1")
+    stream.ingest(ExternalOperationEvent(
+        operation_id="op-1", event_seq=0, source="network", event_type="stream_failed",
+        t_ms=1000, cursor="op-1:0", status="failed", error={"code": "NETWORK_FAILED"},
+    ))
+    assert stream.status() == "failed"
+
+
+def test_stream_rejects_wrong_operation_and_gaps() -> None:
+    stream = ExternalOperationStream("op-1")
+    stream.ingest(ExternalOperationEvent(
+        operation_id="op-1", event_seq=0, source="network", event_type="stream_data",
+        t_ms=1000, cursor="op-1:0",
+    ))
+    with pytest.raises(ExternalOperationError):
+        stream.ingest(ExternalOperationEvent(
+            operation_id="op-2", event_seq=0, source="network", event_type="stream_data",
+            t_ms=1000, cursor="op-2:0",
+        ))
+    with pytest.raises(SequenceGap):
+        stream.ingest(ExternalOperationEvent(
+            operation_id="op-1", event_seq=2, source="network", event_type="stream_data",
+            t_ms=1000, cursor="op-1:2",
+        ))

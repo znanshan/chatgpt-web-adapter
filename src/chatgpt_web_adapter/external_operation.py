@@ -12,8 +12,9 @@ event contract) and the external-operation driving plan Task 3.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 PROTOCOL_V2 = 2
 
@@ -205,3 +206,82 @@ def turn_is_complete(
     if not terminal_evidence:
         return False
     return last_data_age_seconds >= quiescence_window_seconds
+
+
+# Event types that count as stream "data" for the quiescence model (finding
+# 002: data arriving after a terminal marker proves the turn is still live).
+_DATA_EVENT_TYPES: frozenset[str] = frozenset({"text_delta", "content_update", "tool_call", "tool_result"})
+_TERMINAL_EVENT_TYPES: frozenset[str] = frozenset({"end_turn", "status_update", "metadata_update"})
+_FAILURE_EVENT_TYPES: frozenset[str] = frozenset({"stream_failed", "observer_lost"})
+
+
+class ExternalOperationStream:
+    """Consumes content-free protocol-v2 frames for one operation.
+
+    Exposes read/status/result for the normalized stream: completion is only
+    ever declared through the sustained-quiescence terminal model, and a
+    conjunction marker alone keeps the operation ``running``.
+    """
+
+    def __init__(
+        self,
+        operation_id: str,
+        *,
+        quiescence_window_seconds: float = 3.0,
+        now: Callable[[], float] | None = None,
+    ) -> None:
+        if quiescence_window_seconds <= 0:
+            raise ValueError("quiescence_window_seconds must be positive")
+        self.operation_id = operation_id
+        self.quiescence_window_seconds = float(quiescence_window_seconds)
+        self._now = now or time.time
+        self._tracker = CursorTracker()
+        self._events: list[ExternalOperationEvent] = []
+        self._terminal_seen = False
+        self._failed = False
+        self._last_data_t_ms: int | None = None
+        self._last_t_ms: int | None = None
+
+    def ingest(self, event: ExternalOperationEvent) -> None:
+        if event.operation_id != self.operation_id:
+            raise ExternalOperationError(
+                f"event operation {event.operation_id} does not match {self.operation_id}"
+            )
+        self._tracker.validate(self.operation_id, event.source, event.event_seq)
+        if event.error is not None:
+            self._failed = True
+        if event.event_type in _FAILURE_EVENT_TYPES:
+            self._failed = True
+        if event.event_type in _TERMINAL_EVENT_TYPES and event.status in {"completed", "failed"}:
+            self._terminal_seen = True
+        if event.event_type in _DATA_EVENT_TYPES:
+            self._last_data_t_ms = event.t_ms
+        if self._last_t_ms is None or event.t_ms > self._last_t_ms:
+            self._last_t_ms = event.t_ms
+        self._events.append(event)
+
+    def status(self) -> str:
+        if self._failed:
+            return "failed"
+        if self._terminal_seen:
+            anchor = self._last_data_t_ms if self._last_data_t_ms is not None else self._last_t_ms
+            if anchor is None:
+                return "completed"
+            age = max(0.0, (self._now() * 1000.0) - float(anchor))
+            if age / 1000.0 >= self.quiescence_window_seconds:
+                return "completed"
+        return "running"
+
+    def result(self) -> dict[str, Any]:
+        terminal_events = [e for e in self._events if e.event_type in _TERMINAL_EVENT_TYPES]
+        metadata = terminal_events[-1].metadata if terminal_events else {}
+        return {
+            "operation_id": self.operation_id,
+            "status": self.status(),
+            "event_count": len(self._events),
+            "terminal_markers": len(terminal_events),
+            "failed": self._failed,
+            "final_status": metadata.get("status"),
+            "finish_reason": metadata.get("finish_reason"),
+            "last_t_ms": self._last_t_ms,
+        }
