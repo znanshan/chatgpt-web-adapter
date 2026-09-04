@@ -91,17 +91,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     provider = BrowserNativeTurnProvider(state_dir=Path(args.state_dir))
+    # MV3 service workers idle-terminate and drop chrome.debugger attachments,
+    # so attachment must be re-ensured on demand rather than assumed persistent.
     conversation = _discover_displayed_conversation(args.debug_url)
-    if conversation:
+
+    def ensure_attached() -> bool:
+        nonlocal conversation
+        if conversation is None:
+            conversation = _discover_displayed_conversation(args.debug_url)
+        if conversation is None:
+            return False
         observation = provider.observe_turn(conversation=conversation, timeout=20.0)
+        return bool(observation.get("observerAttached"))
+
+    if conversation:
+        attached = ensure_attached()
         print(json.dumps({"phase": "attach", "conversation_discovered": conversation,
-                          "state": observation.get("state"),
-                          "observer_attached": observation.get("observerAttached")},
-                         default=str), flush=True)
-        if not observation.get("observerAttached"):
-            print(json.dumps({"phase": "attach_failed",
-                              "reason": "observer not attached"}), flush=True)
-            return 2
+                          "attached": attached}, default=str), flush=True)
 
     output = Path(args.output) if args.output else None
     if output:
@@ -116,6 +122,14 @@ def main(argv: list[str] | None = None) -> int:
                               "error": f"{type(error).__name__}: {error}"}), flush=True)
             time.sleep(max(0.5, args.interval_seconds))
             continue
+        if (snapshot.get("attached_page_count") or 0) == 0 and ensure_attached():
+            try:
+                snapshot = provider.running_snapshot(timeout=20.0)
+            except Exception as error:
+                print(json.dumps({"phase": "error", "index": index,
+                                  "error": f"{type(error).__name__}: {error}"}), flush=True)
+                time.sleep(max(0.5, args.interval_seconds))
+                continue
         line = json.dumps({"index": index, "t_ms": int(time.time() * 1000), **snapshot},
                           ensure_ascii=False, default=str)
         if output:
