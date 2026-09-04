@@ -35,6 +35,7 @@ let _cwaCharPersistTimer = null;
 let _cwaCharTabUpdatedListener = null;
 let _cwaCharTabActivatedListener = null;
 let _cwaCharTabRemovedListener = null;
+const _cwaCharWriteRequestIds = new Set();
 
 function _cwaCharNow() { return Date.now(); }
 
@@ -123,6 +124,24 @@ function _cwaCharSseEventTypes(decodedChunk) {
   return seen;
 }
 
+// SSE path-value extraction: returns the distinct "/message/..." path tokens
+// (plus "[DONE]") found in a decoded SSE chunk.  Content-free: only path
+// names, never the values/text they carry.
+const CWA_CHAR_SSE_PATH_RE = /"p"\s*:\s*"(\/message\/[^"]+)"/g;
+function _cwaCharSsePaths(decodedChunk) {
+  if (typeof decodedChunk !== "string" || !decodedChunk) return [];
+  const seen = [];
+  let match;
+  CWA_CHAR_SSE_PATH_RE.lastIndex = 0;
+  while ((match = CWA_CHAR_SSE_PATH_RE.exec(decodedChunk)) !== null) {
+    const path = match[1];
+    if (path && !seen.includes(path)) seen.push(path);
+    if (seen.length >= 24) break;
+  }
+  if (decodedChunk.includes("[DONE]") && !seen.includes("[DONE]")) seen.push("[DONE]");
+  return seen;
+}
+
 function _cwaCharNetworkEvent(source, method, params) {
   const tabId = source?.tabId;
   if (!Number.isInteger(tabId)) return;
@@ -133,10 +152,14 @@ function _cwaCharNetworkEvent(source, method, params) {
     const isWrite = typeof isConversationWrite === "function"
       ? isConversationWrite(request?.url || "", request?.method || "")
       : false;
+    if (isWrite && typeof params?.requestId === "string") {
+      _cwaCharWriteRequestIds.add(params.requestId);
+    }
     _cwaCharPush({
       source: "network",
       method,
       tabId,
+      request_id: typeof params?.requestId === "string" ? params.requestId : null,
       url_kind: kind,
       conversation_id: _cwaCharConversationIdFromUrl(request?.url),
       http_method: request?.method || null,
@@ -147,23 +170,40 @@ function _cwaCharNetworkEvent(source, method, params) {
     const response = params?.response;
     const kind = _cwaCharUrlKind(response?.url);
     if (kind === "other_origin") return;
+    const requestId = typeof params?.requestId === "string" ? params.requestId : null;
+    const isWrite = requestId !== null && _cwaCharWriteRequestIds.has(requestId);
+    if (isWrite) {
+      void _cwaCharEnableStream(tabId, requestId);
+    }
     _cwaCharPush({
       source: "network",
       method,
       tabId,
+      request_id: requestId,
       url_kind: kind,
       status: response?.status ?? null,
-      mime: response?.mimeType || null
+      mime: response?.mimeType || null,
+      is_conversation_write: isWrite
     });
   } else if (method === "Network.dataReceived") {
     const size = Number.isFinite(params?.dataLength) ? params.dataLength : null;
+    const requestId = typeof params?.requestId === "string" ? params.requestId : null;
     let types = [];
+    let paths = [];
     if (typeof params?.base64Encoded === "boolean" && params.base64Encoded && typeof params?.data === "string") {
       try {
-        types = _cwaCharSseEventTypes(atob(params.data));
+        const decoded = atob(params.data);
+        types = _cwaCharSseEventTypes(decoded);
+        if (requestId !== null && _cwaCharWriteRequestIds.has(requestId)) {
+          paths = _cwaCharSsePaths(decoded);
+        }
       } catch {}
     }
-    _cwaCharPush({ source: "network", method, tabId, bytes: size, sse_event_types: types });
+    _cwaCharPush({
+      source: "network", method, tabId, bytes: size,
+      is_conversation_write: requestId !== null && _cwaCharWriteRequestIds.has(requestId),
+      sse_event_types: types, sse_paths: paths
+    });
   } else if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
     _cwaCharPush({
       source: "network",
@@ -173,6 +213,29 @@ function _cwaCharNetworkEvent(source, method, params) {
       error: method === "Network.loadingFailed" ? (params?.errorText || null) : null
     });
   }
+}
+
+async function _cwaCharEnableStream(tabId, requestId) {
+  if (!_cwaCharActive) return;
+  try {
+    const result = await chrome.debugger.sendCommand(
+      { tabId },
+      "Network.streamResourceContent",
+      { requestId }
+    );
+    if (typeof result?.bufferedData === "string" && result.bufferedData) {
+      let decoded = "";
+      try { decoded = atob(result.bufferedData); } catch {}
+      const paths = _cwaCharSsePaths(decoded);
+      if (paths.length > 0) {
+        _cwaCharPush({
+          source: "network", method: "Network.streamResourceContent", tabId,
+          is_conversation_write: true, sse_paths: paths,
+          buffered_bytes: typeof result?.bufferedData === "string" ? result.bufferedData.length : null
+        });
+      }
+    }
+  } catch {}
 }
 
 function _cwaCharOnDebuggerEvent(source, method, params) {
@@ -277,6 +340,7 @@ function _cwaCharStart(sessionId) {
 async function _cwaCharStop() {
   if (!_cwaCharActive) return { ok: false, error: "CHARACTERIZE_NOT_ACTIVE" };
   _cwaCharActive = false;
+  _cwaCharWriteRequestIds.clear();
   _cwaCharPush({ source: "session", kind: "stopped" });
   if (_cwaCharDomTimer !== null) {
     clearInterval(_cwaCharDomTimer);
