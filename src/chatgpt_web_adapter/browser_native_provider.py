@@ -255,6 +255,46 @@ class BrowserNativeTurnProvider:
         value = response.get(key)
         return value if isinstance(value, bool) else None
 
+    def characterize_control(
+        self,
+        *,
+        action: str,
+        session_id: str | None = None,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        """Drive the extension's inert bounded event-observation recorder.
+
+        Actions: start / stop / status / dump / clear. Read-only local control
+        of the dedicated Chrome page-owned observation; never submits a turn
+        and never performs a product HTTP read.
+        """
+        if action not in {"start", "stop", "status", "dump", "clear"}:
+            raise ValueError(f"unsupported characterize action: {action}")
+        request_id = str(uuid.uuid4())
+        payload: dict[str, Any] = {
+            "type": "characterize",
+            "action": action,
+            "request_id": request_id,
+        }
+        if session_id is not None:
+            payload["session_id"] = session_id
+        response = self._rpc(payload, timeout=timeout + self.connect_timeout)
+        if response.get("request_id") != request_id:
+            raise RequestError(
+                "BROWSER_NATIVE_RESPONSE_MISMATCH",
+                request_stage="browser_native_characterize",
+            )
+        if not response.get("ok"):
+            raise RequestError(
+                str(response.get("error") or "BROWSER_NATIVE_CHARACTERIZE_FAILED"),
+                request_stage="browser_native_characterize",
+            )
+        return {
+            key: value
+            for key, value in response.items()
+            if key not in {"protocol", "type", "request_id"}
+        }
+
     @staticmethod
     def _normalize_attachment_paths(
         attachment_paths: Sequence[str | Path] | None,

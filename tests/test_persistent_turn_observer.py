@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from chatgpt_web_adapter.browser_native_provider import BrowserNativeTurnProvider
 
 
@@ -48,3 +50,44 @@ def test_provider_reads_observation_without_submitting_or_canonical_read(tmp_pat
     assert captured["type"] == "observe_turn"
     assert "text" not in captured
     assert result == {"state": "RUNNING", "conversationId": "c1"}
+
+
+def test_provider_characterize_control_is_read_only_local(tmp_path, monkeypatch) -> None:
+    from chatgpt_web_adapter.browser_native_provider import RequestError
+
+    provider = BrowserNativeTurnProvider(state_dir=tmp_path)
+    captured = {}
+
+    def ok_rpc(payload, *, timeout, on_event=None):
+        captured.update(payload)
+        return {
+            "protocol": 1,
+            "type": "characterize_result",
+            "request_id": payload["request_id"],
+            "ok": True,
+            "active": True,
+        }
+
+    monkeypatch.setattr(provider, "_rpc", ok_rpc)
+    result = provider.characterize_control(action="start", session_id="session-1")
+    assert captured["type"] == "characterize"
+    assert captured["action"] == "start"
+    assert captured["session_id"] == "session-1"
+    assert "text" not in captured
+    assert result == {"ok": True, "active": True} or result["active"] is True
+
+    def bad_rpc(payload, *, timeout, on_event=None):
+        return {
+            "protocol": 1,
+            "type": "characterize_result",
+            "request_id": payload["request_id"],
+            "ok": False,
+            "error": "CHARACTERIZE_NOT_ACTIVE",
+        }
+
+    monkeypatch.setattr(provider, "_rpc", bad_rpc)
+    with pytest.raises(RequestError, match="CHARACTERIZE_NOT_ACTIVE"):
+        provider.characterize_control(action="stop")
+
+    with pytest.raises(ValueError, match="action"):
+        provider.characterize_control(action="reboot")
