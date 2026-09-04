@@ -9,6 +9,39 @@ ROOT = Path(__file__).resolve().parents[1]
 EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 
 
+def test_provider_running_snapshot_is_local_multi_signal_read(tmp_path, monkeypatch) -> None:
+    provider = BrowserNativeTurnProvider(state_dir=tmp_path)
+    captured = {}
+
+    def ok_rpc(payload, *, timeout, on_event=None):
+        captured.update(payload)
+        return {
+            "protocol": 1,
+            "type": "running_snapshot_result",
+            "request_id": payload["request_id"],
+            "ok": True,
+            "schema": 1,
+            "attached_page_count": 1,
+            "pages": [{
+                "tab_id": 7,
+                "route": "https://chatgpt.com/c/c1",
+                "path_conversation_id": "c1",
+                "entries": [{"id": "c2", "order": 0, "title": "P", "busy": True,
+                             "preview": "", "time": None}],
+                "page": {"stop": True, "turn_ids": [], "last_len": 1, "composer": True},
+            }],
+        }
+
+    monkeypatch.setattr(provider, "_rpc", ok_rpc)
+    result = provider.running_snapshot(timeout=5.0)
+    assert captured["type"] == "running_snapshot"
+    assert "text" not in captured
+    assert "conversationId" not in captured
+    assert result["attached_page_count"] == 1
+    assert result["pages"][0]["entries"][0]["busy"] is True
+    assert result["pages"][0]["page"]["stop"] is True
+
+
 def test_extension_installs_persistent_turn_observer_after_all_writer_layers() -> None:
     assert '"version": "0.1.20"' in (EXT / "manifest.json").read_text(encoding="utf-8")
     entry = (EXT / "service_worker_entry_v3.js").read_text(

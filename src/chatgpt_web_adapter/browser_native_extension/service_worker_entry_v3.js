@@ -371,4 +371,5 @@ importScripts("service_worker_submit_only_v2.js");
 // observer holds without a second attach, and never mutates pages or performs
 // browserless HTTP reads.
 importScripts("service_worker_event_characterization_recorder.js");
+importScripts("service_worker_running_monitor.js");
 importScripts("service_worker_persistent_turn_observer_v3.js");

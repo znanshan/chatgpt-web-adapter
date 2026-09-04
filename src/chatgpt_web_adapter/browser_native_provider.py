@@ -295,6 +295,42 @@ class BrowserNativeTurnProvider:
             if key not in {"protocol", "type", "request_id"}
         }
 
+    def running_snapshot(self, *, timeout: float = 8.0) -> dict[str, Any]:
+        """Read the page's own recent-conversation list + per-page state.
+
+        Local, multi-signal snapshot for the always-on running determination:
+        list ordering, per-entry title/id/busy marker/preview/time, and the
+        displayed conversation's in-page generation state. Never submits a turn
+        and never performs a product HTTP read; requires the persistent
+        observer to hold the runtime tab's debugger.
+        """
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        request_id = str(uuid.uuid4())
+        response = self._rpc(
+            {
+                "type": "running_snapshot",
+                "request_id": request_id,
+                "timeoutMs": int(timeout * 1000),
+            },
+            timeout=timeout + self.connect_timeout,
+        )
+        if response.get("request_id") != request_id:
+            raise RequestError(
+                "BROWSER_NATIVE_RESPONSE_MISMATCH",
+                request_stage="browser_native_running_snapshot",
+            )
+        if not response.get("ok"):
+            raise RequestError(
+                str(response.get("error") or "BROWSER_NATIVE_RUNNING_SNAPSHOT_FAILED"),
+                request_stage="browser_native_running_snapshot",
+            )
+        return {
+            key: value
+            for key, value in response.items()
+            if key not in {"protocol", "type", "request_id"}
+        }
+
     @staticmethod
     def _normalize_attachment_paths(
         attachment_paths: Sequence[str | Path] | None,
