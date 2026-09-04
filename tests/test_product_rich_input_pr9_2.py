@@ -436,7 +436,7 @@ def test_packaged_extension_layers_pr9_2_above_preserved_entrypoint():
         / "browser_native_extension"
     )
     manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.1.19"
+    assert manifest["version"] == "0.1.20"
     assert manifest["background"]["service_worker"] == "service_worker_entry_v3.js"
 
     entrypoint = (extension / manifest["background"]["service_worker"]).read_text(

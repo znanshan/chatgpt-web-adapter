@@ -8,7 +8,7 @@ EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 
 def test_pr88_preserves_pr87_manifest_entrypoint():
     manifest = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.1.19"
+    assert manifest["version"] == "0.1.20"
     assert manifest["background"]["service_worker"] == "service_worker_entry_v3.js"
 
 

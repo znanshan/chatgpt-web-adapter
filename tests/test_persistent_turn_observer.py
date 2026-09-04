@@ -10,7 +10,7 @@ EXT = ROOT / "src" / "chatgpt_web_adapter" / "browser_native_extension"
 
 
 def test_extension_installs_persistent_turn_observer_after_all_writer_layers() -> None:
-    assert '"version": "0.1.19"' in (EXT / "manifest.json").read_text(encoding="utf-8")
+    assert '"version": "0.1.20"' in (EXT / "manifest.json").read_text(encoding="utf-8")
     entry = (EXT / "service_worker_entry_v3.js").read_text(
         encoding="utf-8"
     )
