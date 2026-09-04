@@ -36,6 +36,10 @@ let _cwaCharTabUpdatedListener = null;
 let _cwaCharTabActivatedListener = null;
 let _cwaCharTabRemovedListener = null;
 const _cwaCharWriteRequestIds = new Set();
+// WebSocket bookkeeping: map a debugger request id (the handshake request) to
+// its chatgpt-origin url kind so frame events stay content-free — only token /
+// length metadata for chatgpt sockets is pushed, never raw payload bytes.
+let _cwaCharWsKinds = new Map();
 
 function _cwaCharNow() { return Date.now(); }
 
@@ -212,6 +216,52 @@ function _cwaCharNetworkEvent(source, method, params) {
       encoded_bytes: Number.isFinite(params?.encodedDataLength) ? params.encodedDataLength : null,
       error: method === "Network.loadingFailed" ? (params?.errorText || null) : null
     });
+  } else if (method === "Network.webSocketCreated") {
+    const url = typeof params?.url === "string" ? params.url : "";
+    const kind = _cwaCharUrlKind(url);
+    const requestId = typeof params?.requestId === "string" ? params.requestId : null;
+    if (kind !== "other_origin" && requestId !== null) {
+      _cwaCharWsKinds.set(requestId, kind);
+    }
+    _cwaCharPush({
+      source: "network", method, tabId,
+      request_id: requestId,
+      url_kind: kind
+    });
+  } else if (method === "Network.webSocketFrameReceived" || method === "Network.webSocketFrameSent") {
+    // Content-free: payload is only used to extract SSE event-type / path
+    // tokens for chatgpt text sockets; full payload bytes are never stored.
+    const frame = params?.response;
+    const requestId = typeof params?.requestId === "string" ? params.requestId : null;
+    const kind = requestId !== null ? (_cwaCharWsKinds.get(requestId) || null) : null;
+    const payload = typeof frame?.payloadData === "string" ? frame.payloadData : "";
+    let types = [];
+    let paths = [];
+    if (kind && kind !== "other_origin" && frame?.opcode === 1 && payload) {
+      types = _cwaCharSseEventTypes(payload);
+      if (types.length > 0) paths = _cwaCharSsePaths(payload);
+    }
+    _cwaCharPush({
+      source: "network", method, tabId,
+      request_id: requestId, ws_kind: kind,
+      opcode: Number.isInteger(frame?.opcode) ? frame.opcode : null,
+      payload_bytes: payload ? payload.length : null,
+      sse_event_types: types, sse_paths: paths
+    });
+  } else if (method === "Network.webSocketFrameError") {
+    const error = typeof params?.errorMessage === "string" ? params.errorMessage : null;
+    _cwaCharPush({
+      source: "network", method, tabId,
+      request_id: typeof params?.requestId === "string" ? params.requestId : null,
+      error: error ? error.slice(0, 160) : null
+    });
+  } else if (method === "Network.webSocketClosed") {
+    const requestId = typeof params?.requestId === "string" ? params.requestId : null;
+    if (requestId !== null) _cwaCharWsKinds.delete(requestId);
+    _cwaCharPush({
+      source: "network", method, tabId, request_id: requestId,
+      close_code: Number.isInteger(params?.closeCode) ? params.closeCode : null
+    });
   }
 }
 
@@ -313,6 +363,7 @@ function _cwaCharStart(sessionId) {
   _cwaCharBytes = 0;
   _cwaCharEvents = [];
   _cwaCharDomSamples = 0;
+  _cwaCharWsKinds = new Map();
 
   chrome.debugger.onEvent.addListener(_cwaCharOnDebuggerEvent);
 
@@ -342,6 +393,7 @@ async function _cwaCharStop() {
   _cwaCharActive = false;
   _cwaCharWriteRequestIds.clear();
   _cwaCharPush({ source: "session", kind: "stopped" });
+  _cwaCharWsKinds.clear();
   if (_cwaCharDomTimer !== null) {
     clearInterval(_cwaCharDomTimer);
     _cwaCharDomTimer = null;
@@ -413,6 +465,7 @@ async function _cwaCharClear() {
     _cwaCharEvents = [];
     _cwaCharBytes = 0;
     _cwaCharSeq = 0;
+    _cwaCharWsKinds.clear();
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

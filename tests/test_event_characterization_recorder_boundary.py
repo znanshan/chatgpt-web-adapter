@@ -57,6 +57,28 @@ def test_recorder_handles_characterize_native_message() -> None:
     assert "_get_conversation_payload" not in worker
 
 
+def test_recorder_observes_websocket_frames_content_free() -> None:
+    worker = _read("service_worker_event_characterization_recorder.js")
+    # The real-time conversation stream may ride a WebSocket instead of base64
+    # SSE dataReceived chunks; the recorder must observe those frames too.
+    for method in (
+        "Network.webSocketCreated",
+        "Network.webSocketFrameReceived",
+        "Network.webSocketFrameSent",
+        "Network.webSocketFrameError",
+        "Network.webSocketClosed",
+    ):
+        assert method in worker, method
+    # Frame payloads are reduced to opcode/length plus SSE token/path lists.
+    assert "payload_bytes" in worker
+    assert "opcode" in worker
+    # Raw payload bytes are read for token extraction but never serialized
+    # under their own key into the pushed event log.
+    assert "payloadData" in worker
+    assert '"payload":' not in worker
+    assert '"payloadData":' not in worker
+
+
 def test_worker_import_graph_is_closed_and_recorder_reachable() -> None:
     _IMPORT = re.compile(r'importScripts\("([^"]+)"\)')
 
