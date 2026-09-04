@@ -69,7 +69,7 @@ function _cwaRunMonSnapshotExpression() {
         order: entries.length,
         title: truncate(lines[0] || '', 60),
         busy: Boolean(item && item.querySelector('[class*="animate-spin"]')),
-        preview: truncate(lines[lines.length - 1] || '', CWA_RUNNING_SNAPSHOT_PREVIEW_LEN),
+        preview: truncate(lines[lines.length - 1] || '', ${CWA_RUNNING_SNAPSHOT_PREVIEW_LEN}),
         time: timeText
       });
       if (entries.length >= ${CWA_RUNNING_SNAPSHOT_MAX_ENTRIES}) break;

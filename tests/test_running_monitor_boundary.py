@@ -57,3 +57,18 @@ def test_worker_import_graph_resolves_running_monitor() -> None:
         match = re.match(r'importScripts\("([^"]+)"\)', line.strip())
         if match:
             assert (ROOT / match.group(1)).is_file(), match.group(1)
+
+
+def test_snapshot_constants_are_interpolated_never_bare_in_evaluated_expression() -> None:
+    worker = _read("service_worker_running_monitor.js")
+    # Constants injected into the Runtime.evaluate expression must be template
+    # interpolated; a bare identifier would be a ReferenceError inside the page
+    # context and silently skip every hydrated page.
+    for constant in ("CWA_RUNNING_SNAPSHOT_PREVIEW_LEN", "CWA_RUNNING_SNAPSHOT_MAX_ENTRIES"):
+        assert constant in worker
+        assert f"${{{constant}}}" in worker, constant
+        for line in worker.splitlines():
+            # allow declaration, template interpolation, comments
+            if constant in line and f"${{{constant}}}" not in line:
+                stripped = line.strip()
+                assert stripped.startswith("//") or stripped.startswith("const "), line
