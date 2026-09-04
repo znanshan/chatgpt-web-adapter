@@ -59,6 +59,18 @@ def test_worker_import_graph_resolves_running_monitor() -> None:
             assert (ROOT / match.group(1)).is_file(), match.group(1)
 
 
+def test_snapshot_tail_facts_are_content_free_and_cover_terminal_kinds() -> None:
+    worker = _read("service_worker_running_monitor.js")
+    for field in ("tail_facts", "ends_tool_chain", "plugin_unavailable",
+                  "checkpoint_ok", "ends_punctuated", "length_limit_ui", "content_free"):
+        assert field in worker, field
+    # Facts only: the module must not persist message text itself.
+    assert "content_free: true" in worker
+    # Every terminal kind documented in the plan has a fact or is derivable.
+    assert "已禁用" in worker or "无法访问工作区" in worker  # MCP capability loss
+    assert "state revision" in worker  # checkpoint / clean-completion evidence
+
+
 def test_snapshot_constants_are_interpolated_never_bare_in_evaluated_expression() -> None:
     worker = _read("service_worker_running_monitor.js")
     # Constants injected into the Runtime.evaluate expression must be template

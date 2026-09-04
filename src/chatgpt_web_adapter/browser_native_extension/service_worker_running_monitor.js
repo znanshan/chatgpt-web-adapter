@@ -82,6 +82,28 @@ function _cwaRunMonSnapshotExpression() {
     const turns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
     const last = turns[turns.length - 1];
     const composer = document.querySelector('main [contenteditable="true"]');
+
+    // Content-free tail facts of the last message. Only booleans and lengths
+    // are returned — never message text. Project/MCP capability phrases are
+    // recognized by exact tokens (already observed on @OH-WorkSpace /
+    // @R04-GH3535外协 threads) so the outcome layer can flag a "clean
+    // completion with no real progress" without leaking content.
+    const tail = last ? (last.innerText || '').replace(/\\s+/g, ' ').trim() : '';
+    const tailTail = tail.slice(-600);
+    const toolHits = (tailTail.match(/(called tool|tool call)/gi) || []).length;
+    const endsWithPunct = /[。．.!！?？…:]\\s*$/.test(tailTail);
+    const endsWithToolMarker = /(called tool|tool call)[^\\w]*\\s*$/i.test(tailTail);
+    const bannersText = [...document.querySelectorAll('[role="alert"], [data-testid^="banner"]')]
+      .map((b) => (b.innerText || '')).join(' ');
+    const tailFacts = {
+      tail_len: tailTail.length,
+      ends_tool_chain: toolHits >= 3 && endsWithToolMarker && !endsWithPunct,
+      plugin_unavailable: /已禁用|无法访问工作区|无权限访问|plugin.*(unavailable|disabled)|执行端明确返回/i.test(tailTail),
+      checkpoint_ok: /ok\\s*=\\s*true|state revision \\d+|checkpoint/i.test(tailTail),
+      ends_punctuated: endsWithPunct,
+      length_limit_ui: /长度上限|too long|reached the limit|length limit|对话已达/i.test(bannersText + ' ' + tailTail),
+      content_free: true
+    };
     return {
       route: location.href,
       path_conversation_id: pathId,
@@ -90,7 +112,8 @@ function _cwaRunMonSnapshotExpression() {
         stop: Boolean(stops.find(isVisible)),
         turn_ids: turns.slice(-8).map((t) => t.getAttribute('data-testid')),
         last_len: last ? (last.innerText || '').length : null,
-        composer: Boolean(composer && isVisible(composer))
+        composer: Boolean(composer && isVisible(composer)),
+        tail_facts: tailFacts
       }
     };
   })()`;
