@@ -363,4 +363,12 @@ importScripts("service_worker_rich_input_closure_repair_pr9_2.js");
 // identity before destructive cleanup. Loaded last.
 importScripts("service_worker_rich_input_schema7_repair_pr9_2.js");
 importScripts("service_worker_submit_only_v2.js");
+
+// Bounded event-observation characterization recorder (protocol-v2 pre-work).
+// Inert by default; activated only by an explicit native "characterize"
+// message. Loaded before the persistent turn observer so that observer stays
+// the final production layer; it observes the same debugger sessions the
+// observer holds without a second attach, and never mutates pages or performs
+// browserless HTTP reads.
+importScripts("service_worker_event_characterization_recorder.js");
 importScripts("service_worker_persistent_turn_observer_v3.js");
