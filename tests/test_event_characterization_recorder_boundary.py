@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "chatgpt_web_adapter" / "browser_native_extension"
@@ -54,3 +55,25 @@ def test_recorder_handles_characterize_native_message() -> None:
         assert action in worker
     # No browserless HTTP canonical read surface exists on the recorder.
     assert "_get_conversation_payload" not in worker
+
+
+def test_worker_import_graph_is_closed_and_recorder_reachable() -> None:
+    _IMPORT = re.compile(r'importScripts\("([^"]+)"\)')
+
+    def targets(source: str) -> list[str]:
+        return _IMPORT.findall(source)
+
+    def walk(name: str, visited: set[str]) -> None:
+        if name in visited:
+            return
+        visited.add(name)
+        assert (ROOT / name).is_file(), f"import target missing: {name}"
+        for child in targets(_read(name)):
+            walk(child, visited)
+
+    visited: set[str] = set()
+    walk("service_worker_entry_v3.js", visited)
+    # The recorder is in the reachable production graph and every import target
+    # resolves, so a live extension reload cannot break the worker chain.
+    assert "service_worker_event_characterization_recorder.js" in visited
+    assert "service_worker.js" in visited
