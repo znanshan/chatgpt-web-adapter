@@ -100,6 +100,41 @@ def test_observation_is_not_blocked_by_an_active_writer(monkeypatch, tmp_path) -
     assert result["observation"]["state"] == "RUNNING"
 
 
+def test_list_surface_is_a_read_not_blocked_by_an_active_writer(monkeypatch, tmp_path) -> None:
+    import chatgpt_web_adapter.browser_native_host as subject
+
+    broker = BrowserNativeBroker(state_dir=tmp_path)
+    broker.extension_connected = True
+
+    def fake_write(stream, forwarded):
+        broker.route_native_message({
+            "protocol": 1,
+            "type": "list_surface_result",
+            "request_id": forwarded["request_id"],
+            "ok": True,
+            "tab_id": 11,
+            "attached": True,
+            "url": "https://chatgpt.com/",
+        })
+
+    monkeypatch.setattr(subject, "write_native_message", fake_write)
+    broker.turn_lock.acquire()
+    try:
+        result = broker.handle_local_request({
+            "protocol": 1,
+            "token": broker.token,
+            "type": "observe_list_surface",
+            "request_id": "surface-while-writing",
+            "timeoutMs": 1000,
+        })
+    finally:
+        broker.turn_lock.release()
+        broker._server.server_close()
+
+    assert result["ok"] is True
+    assert result["attached"] is True
+
+
 def test_running_snapshot_is_a_read_not_blocked_by_an_active_writer(monkeypatch, tmp_path) -> None:
     import chatgpt_web_adapter.browser_native_host as subject
 

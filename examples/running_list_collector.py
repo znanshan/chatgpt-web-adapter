@@ -93,9 +93,18 @@ def main(argv: list[str] | None = None) -> int:
     provider = BrowserNativeTurnProvider(state_dir=Path(args.state_dir))
     # MV3 service workers idle-terminate and drop chrome.debugger attachments,
     # so attachment must be re-ensured on demand rather than assumed persistent.
+    # Prefer the resident list surface (dedicated ChatGPT root page): it carries
+    # the full account list with no single-view bounce and no self-exclusion.
+    # Conversation-page attachment is the fallback when no root page is usable.
     conversation = _discover_displayed_conversation(args.debug_url)
 
     def ensure_attached() -> bool:
+        try:
+            surface = provider.observe_list_surface(timeout=20.0)
+        except Exception:
+            surface = {}
+        if surface.get("attached"):
+            return True
         nonlocal conversation
         if conversation is None:
             conversation = _discover_displayed_conversation(args.debug_url)

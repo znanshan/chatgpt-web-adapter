@@ -9,6 +9,8 @@
 
 const CWA_TURN_LEDGER_KEY = "cwaPersistentTurnLedgerV1";
 const CWA_TURN_LEDGER_SCHEMA = 1;
+const CWA_LIST_SURFACE_KEY = "cwaListSurfaceTabIdV1";
+const CWA_LIST_SURFACE_URL = "https://chatgpt.com/";
 const _cwaObservedTabs = new Set();
 const _cwaTurnsByRequest = new Map();
 const _cwaLatestByTab = new Map();
@@ -360,22 +362,54 @@ executeNativeTurn = async function _executeNativeTurnWithPersistentObservation(m
 
 const _cwaPersistentPriorOnNativeMessage = onNativeMessage;
 onNativeMessage = async function _onNativeMessageWithPersistentObservation(message, port) {
-  if (message?.protocol !== BRIDGE_PROTOCOL_VERSION || message?.type !== "observe_turn") {
+  if (message?.protocol !== BRIDGE_PROTOCOL_VERSION ||
+      (message?.type !== "observe_turn" && message?.type !== "observe_list_surface")) {
     return _cwaPersistentPriorOnNativeMessage(message, port);
   }
   const requestId = message.request_id;
   if (typeof requestId !== "string" || !requestId) return;
   try {
-    const observation = await _cwaObserveTurn(message);
+    const observation = message?.type === "observe_turn"
+      ? await _cwaObserveTurn(message)
+      : await _cwaEnsureListSurface(message);
     safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION, type: "turn_observation_result",
-      request_id: requestId, ok: true, observation
+      protocol: BRIDGE_PROTOCOL_VERSION,
+      type: message?.type === "observe_turn" ? "turn_observation_result" : "list_surface_result",
+      request_id: requestId, ok: true,
+      ...(message?.type === "observe_turn" ? { observation } : observation)
     });
   } catch (error) {
     safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION, type: "turn_observation_result",
+      protocol: BRIDGE_PROTOCOL_VERSION,
+      type: message?.type === "observe_turn" ? "turn_observation_result" : "list_surface_result",
       request_id: requestId, ok: false,
       error: error instanceof Error ? error.message : String(error)
     });
   }
 };
+
+// Resident list surface: a dedicated ChatGPT root page whose own DOM carries
+// the account-level recent-conversation list (no single-view bounce, no
+// self-exclusion). The persistent observer holds its debugger so the
+// `running_snapshot` read can evaluate the full list on demand.
+async function _cwaEnsureListSurface(message) {
+  const stored = await chrome.storage.local.get(CWA_LIST_SURFACE_KEY);
+  let tabId = Number.isInteger(stored?.[CWA_LIST_SURFACE_KEY])
+    ? stored[CWA_LIST_SURFACE_KEY] : null;
+  let tab = null;
+  if (tabId !== null) {
+    try { tab = await chrome.tabs.get(tabId); } catch { tab = null; }
+  }
+  if (tab === null) {
+    tab = await chrome.tabs.create({ url: CWA_LIST_SURFACE_URL, active: false });
+    tabId = tab?.id;
+    await chrome.storage.local.set({ [CWA_LIST_SURFACE_KEY]: tabId });
+  }
+  await _cwaEnsurePersistentObserver(tabId);
+  const current = await chrome.tabs.get(tabId);
+  return {
+    tab_id: tabId,
+    attached: _cwaObservedTabs.has(tabId),
+    url: current?.url || null
+  };
+}

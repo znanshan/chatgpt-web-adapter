@@ -295,6 +295,39 @@ class BrowserNativeTurnProvider:
             if key not in {"protocol", "type", "request_id"}
         }
 
+    def observe_list_surface(self, *, timeout: float = 8.0) -> dict[str, Any]:
+        """Ensure the resident list surface (dedicated ChatGPT root page) and
+        attach the persistent observer to it.
+
+        The root page's own DOM carries the account-level recent-conversation
+        list without the single-view bounce or self-exclusion of conversation
+        pages; `running_snapshot` can then evaluate it on demand. Read-only
+        local operation; never submits a turn.
+        """
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        request_id = str(uuid.uuid4())
+        response = self._rpc(
+            {"type": "observe_list_surface", "request_id": request_id,
+             "timeoutMs": int(timeout * 1000)},
+            timeout=timeout + self.connect_timeout,
+        )
+        if response.get("request_id") != request_id:
+            raise RequestError(
+                "BROWSER_NATIVE_RESPONSE_MISMATCH",
+                request_stage="browser_native_list_surface",
+            )
+        if not response.get("ok"):
+            raise RequestError(
+                str(response.get("error") or "BROWSER_NATIVE_LIST_SURFACE_FAILED"),
+                request_stage="browser_native_list_surface",
+            )
+        return {
+            key: value
+            for key, value in response.items()
+            if key not in {"protocol", "type", "request_id"}
+        }
+
     def running_snapshot(self, *, timeout: float = 8.0) -> dict[str, Any]:
         """Read the page's own recent-conversation list + per-page state.
 

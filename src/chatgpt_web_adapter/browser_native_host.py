@@ -155,7 +155,8 @@ class BrowserNativeBroker:
             }
 
         if operation not in {
-            "turn", "release_runtime_tab", "observe_turn", "characterize", "running_snapshot"
+            "turn", "release_runtime_tab", "observe_turn", "characterize", "running_snapshot",
+            "observe_list_surface",
         }:
             return {**base, "ok": False, "error": "BROWSER_NATIVE_UNKNOWN_OPERATION"}
         if not isinstance(request_id, str) or not request_id:
@@ -163,7 +164,7 @@ class BrowserNativeBroker:
         if not self.extension_connected:
             return {**base, "ok": False, "error": "BROWSER_NATIVE_EXTENSION_NOT_CONNECTED"}
         mutation_lock_acquired = False
-        if operation not in {"observe_turn", "characterize", "running_snapshot"}:
+        if operation not in {"observe_turn", "characterize", "running_snapshot", "observe_list_surface"}:
             mutation_lock_acquired = self.turn_lock.acquire(blocking=False)
             if not mutation_lock_acquired:
                 return {**base, "ok": False, "error": "BROWSER_NATIVE_BRIDGE_BUSY"}

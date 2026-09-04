@@ -42,6 +42,30 @@ def test_provider_running_snapshot_is_local_multi_signal_read(tmp_path, monkeypa
     assert result["pages"][0]["page"]["stop"] is True
 
 
+def test_provider_observe_list_surface_is_read_only_local(tmp_path, monkeypatch) -> None:
+    provider = BrowserNativeTurnProvider(state_dir=tmp_path)
+    captured = {}
+
+    def ok_rpc(payload, *, timeout, on_event=None):
+        captured.update(payload)
+        return {
+            "protocol": 1,
+            "type": "list_surface_result",
+            "request_id": payload["request_id"],
+            "ok": True,
+            "tab_id": 11,
+            "attached": True,
+            "url": "https://chatgpt.com/",
+        }
+
+    monkeypatch.setattr(provider, "_rpc", ok_rpc)
+    result = provider.observe_list_surface(timeout=5.0)
+    assert captured["type"] == "observe_list_surface"
+    assert "text" not in captured
+    assert result["attached"] is True
+    assert result["url"] == "https://chatgpt.com/"
+
+
 def test_extension_installs_persistent_turn_observer_after_all_writer_layers() -> None:
     assert '"version": "0.1.20"' in (EXT / "manifest.json").read_text(encoding="utf-8")
     entry = (EXT / "service_worker_entry_v3.js").read_text(
