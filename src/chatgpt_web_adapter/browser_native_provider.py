@@ -47,6 +47,12 @@ class BrowserNativeTurnResult:
     foreground_activation_observed: bool | None = None
     browser_authority_lease_id: str | None = None
     attachment_count: int = 0
+    # Submit-only reports the HTTP status it actually read from the network when
+    # it has one.  Without these, a caller cannot tell a real 2xx from the
+    # dispatched-only 202 fallback, which is how a backend rejection used to be
+    # indistinguishable from success.
+    response_status_observed: bool = False
+    conversation_response_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -520,6 +526,13 @@ class BrowserNativeTurnProvider:
             if isinstance(response_lease_id, str)
             else None,
             attachment_count=attachment_count,
+            response_status_observed=response.get("responseStatusObserved") is True,
+            conversation_response_status=(
+                response.get("conversationResponseStatus")
+                if isinstance(response.get("conversationResponseStatus"), int)
+                and not isinstance(response.get("conversationResponseStatus"), bool)
+                else None
+            ),
         )
 
     def send_text(

@@ -220,11 +220,22 @@ executeNativeTurn = async function _executeNativeTurnWithSubmitOnly(message) {
     const acknowledged = _submitOnlyAcknowledgedPageTurn;
     if (acknowledged === null) throw error;
     const tabId = acknowledged.diagnostics.tabId;
+    // THIS object is what the caller actually receives on the submit-only
+    // success path: _executeSubmitOnlyPageTurn throws
+    // CWA_SUBMIT_ONLY_ACKNOWLEDGED to abort the inherited completion chain, and
+    // this catch turns that throw back into a result.  service_worker.js's own
+    // return is never reached, so hard-coding 202 here would fabricate the
+    // verdict even after the observer learned the real status.
+    //
+    // Report the status that was actually read, and carry the discriminators so
+    // a caller can tell an observed verdict from the dispatched-only fallback.
     return {
       conversationId: acknowledged.conversationId,
       turnExchangeId: null,
-      responseStatus: 202,
-      responseMimeType: null,
+      responseStatus: acknowledged.diagnostics.responseStatus,
+      responseStatusObserved: acknowledged.diagnostics.responseStatusObserved === true,
+      conversationResponseStatus: acknowledged.diagnostics.conversationResponseStatus ?? null,
+      responseMimeType: acknowledged.diagnostics.responseMimeType ?? null,
       finalUrl: acknowledged.finalUrl,
       tabId,
       tabWasActive: acknowledged.diagnostics.tabWasActive,
