@@ -167,6 +167,11 @@ def test_send_submit_only_returns_submission_ack_without_final_response(monkeypa
             SimpleNamespace(
                 conversation_id="conversation-1",
                 response_status=202,
+                # The dispatched-only fallback: no response was read off the
+                # network, so the verdict is unconfirmed.  Mirrors
+                # BrowserNativeTurnResult, which always carries these.
+                response_status_observed=False,
+                conversation_response_status=None,
                 elapsed_ms=37,
             )
         )
@@ -189,5 +194,8 @@ def test_send_submit_only_returns_submission_ack_without_final_response(monkeypa
         "submitted": True,
         "conversation_id": "conversation-1",
         "backend_status": 202,
+        # Present so the bridge can tell this 202 apart from a real observed 2xx.
+        "response_status_observed": False,
+        "conversation_response_status": None,
         "elapsed_ms": 37,
     }

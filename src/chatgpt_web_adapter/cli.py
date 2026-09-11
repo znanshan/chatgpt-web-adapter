@@ -390,11 +390,17 @@ def _run_send(args: argparse.Namespace) -> int:
                 )
         except BrowserNativeSubmissionAcknowledged as acknowledged:
             turn = acknowledged.turn
+            # response_status_observed distinguishes a real 2xx read off the network
+            # from the dispatched-only 202 fallback.  Without it in the payload the
+            # bridge cannot tell a confirmed write from an assumed one, and its
+            # writer_result audit records empty fields for a real success.
             print(json.dumps({
                 "ok": True,
                 "submitted": True,
                 "conversation_id": turn.conversation_id,
                 "backend_status": turn.response_status,
+                "response_status_observed": turn.response_status_observed,
+                "conversation_response_status": turn.conversation_response_status,
                 "elapsed_ms": turn.elapsed_ms,
             }, ensure_ascii=False))
             return 0

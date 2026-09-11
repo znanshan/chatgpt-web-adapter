@@ -65,6 +65,27 @@ def test_submit_only_reads_the_real_status_instead_of_reporting_202() -> None:
     assert "responseStatus: 202," not in source.split("responseStatusObserved")[-1]
 
 
+def test_submit_only_cli_payload_reports_whether_the_status_was_observed() -> None:
+    """The submit-only stdout payload must carry the observed-status markers.
+
+    The bridge reads this payload to distinguish a real 2xx from the
+    dispatched-only 202 fallback.  Without these keys its writer_result audit
+    records empty fields for a real success -- which is exactly what happened, and
+    was only noticed by reading a production record rather than the tests.
+    """
+    cli = (
+        Path(__file__).parents[1] / "src" / "chatgpt_web_adapter" / "cli.py"
+    ).read_text(encoding="utf-8")
+    start = cli.index("except BrowserNativeSubmissionAcknowledged")
+    end = cli.index("return 0", start)
+    payload = cli[start:end]
+
+    assert '"conversation_id": turn.conversation_id' in payload
+    assert '"backend_status": turn.response_status' in payload
+    assert '"response_status_observed": turn.response_status_observed' in payload
+    assert '"conversation_response_status": turn.conversation_response_status' in payload
+
+
 def test_turn_result_carries_whether_the_status_was_actually_observed() -> None:
     """A caller must be able to tell a real 2xx from the dispatched-only 202."""
     default = BrowserNativeTurnResult(
