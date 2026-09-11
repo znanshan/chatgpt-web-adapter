@@ -495,7 +495,13 @@ async function executeOfficialPageTurn({ tabId, text, timeoutMs, onUiState = nul
 
     if (submitOnly) {
       const finalTab = await chrome.tabs.get(tabId);
+      // This older branch acks on the dispatch event alone and has no network
+      // response to report, so 202 here means "dispatched, unconfirmed".
+      // service_worker_submit_only_v2.js replaces this path and does read the
+      // real status; record the fallback explicitly so the two are
+      // distinguishable instead of both claiming a server verdict.
       diagnostics.responseStatus = 202;
+      diagnostics.responseStatusObserved = false;
       diagnostics.elapsedMs = elapsedMs(startedAt);
       return {
         diagnostics,
@@ -611,8 +617,21 @@ async function executeNativeTurn(message) {
   if (!resolvedConversationId && message.submitOnly !== true) {
     throw new Error("CHATGPT_TURN_MISSING_CONVERSATION_ID");
   }
-  const expectedStatus = message.submitOnly === true ? 202 : 200;
-  if (result.diagnostics.responseStatus !== expectedStatus) {
+  // Under submit-only the extension now reports the status it actually read
+  // from the network when it has one, so demanding exactly 202 would reject a
+  // genuine 200.  Require a real 2xx instead.  The previous submit-only form
+  // compared against a value the submit-only path had just hard-coded, which
+  // made this check vacuously true and hid every backend rejection.
+  if (message.submitOnly === true) {
+    const submitOnlyStatus = result.diagnostics.responseStatus;
+    if (
+      !Number.isInteger(submitOnlyStatus) ||
+      submitOnlyStatus < 200 ||
+      submitOnlyStatus >= 300
+    ) {
+      throw new Error(`CHATGPT_TURN_HTTP_STATUS:${submitOnlyStatus}`);
+    }
+  } else if (result.diagnostics.responseStatus !== 200) {
     throw new Error(`CHATGPT_TURN_HTTP_STATUS:${result.diagnostics.responseStatus}`);
   }
   if (result.diagnostics.debuggerAttachedAfter === true) {

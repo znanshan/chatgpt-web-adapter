@@ -256,10 +256,10 @@ function _pr88InstantModeSnapshotExpression() {
     const classify = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (text === 'instant' || text === 'мгновенно') return 'INSTANT';
-      if (text === 'medium' || text === 'средний' || text === 'thinking standard') return 'MEDIUM';
-      if (text === 'extra high' || text === 'очень высокий' || text === 'thinking heavy') return 'EXTRA_HIGH';
-      if (text === 'high' || text === 'высокий' || text === 'thinking extended') return 'HIGH';
+      if (text === 'instant' || text === '即时' || text === 'мгновенно') return 'INSTANT';
+      if (text === 'medium' || text === '中' || text === 'средний' || text === 'thinking standard') return 'MEDIUM';
+      if (text === 'extra high' || text === '极高' || text === 'очень высокий' || text === 'thinking heavy') return 'EXTRA_HIGH';
+      if (text === 'high' || text === '高' || text === 'высокий' || text === 'thinking extended') return 'HIGH';
       if (text === 'pro standard') return 'PRO_STANDARD';
       if (text === 'pro extended') return 'PRO_EXTENDED';
       if (text === 'thinking') return 'REASONING_OTHER';

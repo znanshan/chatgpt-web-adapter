@@ -3,7 +3,7 @@
 
 const _submitOnlyPriorExecuteNativeTurn = executeNativeTurn;
 let _submitOnlyAcknowledgedPageTurn = null;
-const CWA_SUBMIT_COMMIT_OBSERVATION_MS = 2_000;
+const CWA_SUBMIT_COMMIT_OBSERVATION_MS = 5_000;
 
 async function _submitOnlyLocalSnapshot(debuggee) {
   const result = await sendCommand(debuggee, "Runtime.evaluate", {
@@ -22,18 +22,40 @@ async function _submitOnlyLocalSnapshot(debuggee) {
   return result?.result?.value || { composerText: null, turnCount: null, generating: false };
 }
 
-async function _submitOnlyWaitForAckOrGeneration(requestSeen, debuggee, timeoutMs) {
+// The commit observation window exists to learn what the server actually did
+// with the write.  Historically it returned as soon as the conversation POST
+// was *dispatched* (Network.requestWillBeSent) and never read the response, so
+// the real HTTP status -- including a 429 -- was discarded inside the
+// extension and the caller was told "202".  Keep watching inside the same
+// bounded window for the response: a >=400 status is decisive evidence that
+// the turn did not land and must be surfaced as CHATGPT_TURN_HTTP_STATUS.
+// A missing response must NOT become a failure -- the write may still have
+// landed -- so the window still degrades to the dispatched-only verdict.
+async function _submitOnlyWaitForAckOrGeneration(
+  requestSeen, rejected, accepted, debuggee, timeoutMs
+) {
   const deadline = performance.now() + Math.max(1, timeoutMs);
+  let requestObserved = false;
+  let pendingRequestSeen = requestSeen;
   while (performance.now() < deadline) {
     const winner = await Promise.race([
-      requestSeen.then(() => "network"),
+      rejected.then(() => "rejected"),
+      accepted.then(() => "accepted"),
+      pendingRequestSeen.then(() => "network"),
       sleep(Math.min(100, Math.max(1, deadline - performance.now()))).then(() => null)
     ]);
-    if (winner === "network") return winner;
+    if (winner === "rejected") return "rejected";
+    if (winner === "accepted") return "accepted";
+    if (winner === "network") {
+      requestObserved = true;
+      // Do not re-win the race on the already-observed dispatch event; the
+      // remaining budget belongs to the response observation.
+      pendingRequestSeen = new Promise(() => {});
+    }
     const snapshot = await _submitOnlyLocalSnapshot(debuggee);
     if (snapshot.generating === true) return "local_generation";
   }
-  return null;
+  return requestObserved ? "network" : null;
 }
 
 async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
@@ -50,7 +72,15 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     submitStrategy: null,
     submitButtonSelector: null,
     submitAckMs: null,
+    // ``responseStatus`` is the verdict reported to the caller.  It is only a
+    // fallback now: ``responseStatusObserved`` records whether the real HTTP
+    // status was actually read from the network, and
+    // ``conversationResponseStatus`` carries it.  Reporting 202 without
+    // setting ``responseStatusObserved`` means "dispatched, unconfirmed",
+    // never "the server accepted it".
     responseStatus: 202,
+    responseStatusObserved: false,
+    conversationResponseStatus: null,
     responseMimeType: null,
     conversationRequestSeen: false,
     conversationResponseSeen: false,
@@ -74,12 +104,40 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     );
     let resolveRequestSeen;
     const requestSeen = new Promise((resolve) => { resolveRequestSeen = resolve; });
+    let resolveRejected;
+    const rejected = new Promise((resolve) => { resolveRejected = resolve; });
+    let resolveAccepted;
+    const accepted = new Promise((resolve) => { resolveAccepted = resolve; });
+    let conversationRequestId = null;
     eventListener = (source, method, params) => {
-      if (source.tabId !== tabId || method !== "Network.requestWillBeSent") return;
-      const request = params?.request;
-      if (isConversationWrite(request?.url || "", request?.method || "")) {
+      if (source.tabId !== tabId) return;
+      if (method === "Network.requestWillBeSent") {
+        const request = params?.request;
+        if (!isConversationWrite(request?.url || "", request?.method || "")) return;
         diagnostics.conversationRequestSeen = true;
+        // Bind the observation to the first conversation write: the submit is
+        // the request whose response tells us whether the turn was accepted.
+        if (conversationRequestId === null) conversationRequestId = params.requestId;
         resolveRequestSeen(params.requestId);
+        return;
+      }
+      if (method !== "Network.responseReceived") return;
+      if (conversationRequestId === null || params?.requestId !== conversationRequestId) return;
+      const status = params?.response?.status;
+      if (!Number.isInteger(status)) return;
+      diagnostics.conversationResponseSeen = true;
+      diagnostics.responseStatusObserved = true;
+      diagnostics.conversationResponseStatus = status;
+      diagnostics.responseMimeType =
+        typeof params.response.mimeType === "string" ? params.response.mimeType : null;
+      if (status >= 400) {
+        resolveRejected(status);
+        return;
+      }
+      if (status >= 200 && status < 300) {
+        // The real status supersedes the 202 fallback.
+        diagnostics.responseStatus = status;
+        resolveAccepted(status);
       }
     };
     chrome.debugger.onEvent.addListener(eventListener);
@@ -96,8 +154,19 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
     diagnostics.submitButtonSelector = submit.selector;
     const ackBudget = Math.min(remainingMs(startedAt, timeoutMs), CWA_SUBMIT_COMMIT_OBSERVATION_MS);
     let acknowledgement = await _submitOnlyWaitForAckOrGeneration(
-      requestSeen, debuggee, ackBudget
+      requestSeen, rejected, accepted, debuggee, ackBudget
     );
+    if (acknowledgement === "rejected") {
+      // The server refused the write (429 / 5xx).  Throw before
+      // _submitOnlyAcknowledgedPageTurn is assigned so the concrete status
+      // reaches the CLI and the bridge, which classifies it as a writer rate
+      // limit, applies the account cooldown, and preserves the attempt.
+      // Reporting this as an acknowledged submission is what silently burned
+      // whole turns and held the account gate for the entire turn.
+      throw new Error(
+        `CHATGPT_TURN_HTTP_STATUS:${diagnostics.conversationResponseStatus}`
+      );
+    }
     if (acknowledgement === null) {
       let after = await _submitOnlyLocalSnapshot(debuggee);
       if (acknowledgement === null) {
