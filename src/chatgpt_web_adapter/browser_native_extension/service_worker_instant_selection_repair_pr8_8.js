@@ -53,20 +53,31 @@ function _pr88SelectionQueryConflict(message) {
 function _pr88SelectionPointExpression(kind) {
   return `(() => {
     const normalize = (value) => String(value || '').trim().toLowerCase().replace(/[\\s_\\-]+/g, ' ');
+    // THE MODE LABELS ARE LOCALE-DEPENDENT, and this classifier is the one that decides WHERE the
+    // mode control is, i.e. it gates the submit. Measured 2026-09-12: this deployment renders the
+    // effort control as the Chinese single characters ("高"), so an English+Russian-only table left
+    // every candidate unclassified, the function returned picker_missing, and the writer failed
+    // with PR8_10_MODEL_PROFILE_PICKER_NOT_PROVEN -- the prompt was never submitted at all
+    // (submission_count 0), twice in a row. The sibling classifier in
+    // service_worker_instant_mode_pr8_8.js (_pr88InstantModeSnapshotExpression) already carried
+    // the Chinese characters and the apostrophe-free variants; this one must agree with it, because
+    // two tables that disagree about the same UI are how "the mode is fine" and "the picker is
+    // missing" get reported for the same page.
     const classify = (value) => {
       const text = normalize(value);
       if (!text) return null;
       if (
         text === 'instant' ||
+        text === '即时' ||
         text === 'мгновенно' ||
         text.startsWith('instant ') ||
         text.includes(' instant') ||
         text.startsWith('мгновенно ') ||
         text.includes(' мгновенно')
       ) return 'INSTANT';
-      if (text === 'medium' || text === 'средний' || text.includes('thinking standard')) return 'MEDIUM';
-      if (text === 'extra high' || text === 'очень высокий' || text.includes('thinking heavy')) return 'EXTRA_HIGH';
-      if (text === 'high' || text === 'высокий' || text.includes('thinking extended')) return 'HIGH';
+      if (text === 'medium' || text === '中' || text === 'средний' || text.includes('thinking standard')) return 'MEDIUM';
+      if (text === 'extra high' || text === '极高' || text === 'очень высокий' || text.includes('thinking heavy')) return 'EXTRA_HIGH';
+      if (text === 'high' || text === '高' || text === 'высокий' || text.includes('thinking extended')) return 'HIGH';
       if (text === 'pro standard') return 'PRO_STANDARD';
       if (text === 'pro extended') return 'PRO_EXTENDED';
       if (text === 'thinking') return 'REASONING_OTHER';

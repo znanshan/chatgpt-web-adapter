@@ -177,6 +177,47 @@ def test_selection_worker_mutates_only_picker_before_prompt_and_tracks_network_b
     assert "raw request/response payloads" in text
 
 
+def test_both_mode_classifiers_accept_the_same_locale_labels():
+    """The two tables must agree about the LOCALE LABELS, and cover the locale this deployment uses.
+
+    Why this exists -- measured 2026-09-12 on the Temp runtime. The control this classifier has to
+    find rendered as the Chinese single character "高" (10 px from the composer). This file's table
+    accepted English and Russian only, so every candidate came back unclassified, the selection
+    point returned `picker_missing`, and the writer died with
+    `PR8_10_MODEL_PROFILE_PICKER_NOT_PROVEN:picker_missing` -- with `submission_count=0`, i.e. the
+    prompt was never sent at all, twice in a row, and the project could not advance.
+
+    The sibling classifier in `service_worker_instant_mode_pr8_8.js` had carried the Chinese
+    characters all along. Two tables that disagree about the same UI is how "the mode is fine" and
+    "the picker is missing" get reported for one page.
+
+    Only the LOCALE labels are compared, not every literal: the two tables legitimately differ in
+    their English phrasings (instant_mode matches the long "thinking standard/heavy/extended" forms
+    with `includes`, this one with the terse ones), and asserting full equality would fail on that
+    legitimate difference instead of on a locale gap.
+    """
+    import re
+
+    root = browser_native_extension_dir()
+    locale_characters = {"即时", "中", "高", "极高", "мгновенно", "средний", "высокий", "очень высокий"}
+
+    def locale_labels(filename: str) -> set[str]:
+        text = (root / filename).read_text(encoding="utf-8")
+        return {label for label in re.findall(r"text === '([^']+)'", text)
+                if label in locale_characters}
+
+    repair = locale_labels("service_worker_instant_selection_repair_pr8_8.js")
+    instant = locale_labels("service_worker_instant_mode_pr8_8.js")
+
+    # The locale this deployment actually renders. Without these the submit cannot be located.
+    for label in ("即时", "中", "高", "极高"):
+        assert label in repair, f"the selection-point classifier cannot see the label {label!r}"
+    assert repair == instant, (
+        "the two mode-label tables disagree about the non-English labels, which is how one path "
+        f"reports a mode while the other reports picker_missing. repair-only={sorted(repair - instant)} "
+        f"instant-only={sorted(instant - repair)}")
+
+
 def test_provider_parses_lease_fenced_selection_record(monkeypatch):
     provider = InstantSelectionRepairProvider()
 

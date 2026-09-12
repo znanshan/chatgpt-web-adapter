@@ -9,9 +9,19 @@ function _pr88InstantEffortDomTriggerClickExpression(expectedMode) {
     const effort=(value)=>{
       const text=normalize(value);
       if(!text) return null;
-      if(/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if(/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if(/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE-AGNOSTIC AND ORDERED. Two defects lived here (measured 2026-09-12 against the live
+      // composer, whose control renders as the Chinese single character "高"):
+      //   1. the table was English+Russian only, so the real control classified to null and the
+      //      caller reported picker_missing / model-control-not-proven, which BLOCKS the submit --
+      //      the prompt was never sent (submission_count 0);
+      //   2. there was no EXTRA_HIGH branch, so "extra high" fell through to the HIGH test below
+      //      and was reported as HIGH -- a wrong mode silently chosen, which is worse than a miss.
+      // Chinese labels are matched with includes(), not \b: there is no word boundary between CJK
+      // characters and the surrounding text.
+      if(/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if(text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if(/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中') return 'MEDIUM';
+      if(/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高') return 'HIGH';
       return null;
     };
     const visible=(el)=>{

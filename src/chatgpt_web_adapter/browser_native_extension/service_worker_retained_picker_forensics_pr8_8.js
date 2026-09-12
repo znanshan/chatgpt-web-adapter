@@ -66,10 +66,12 @@ function _pr88ForensicsDomExpression() {
       if (!text) return [];
       const out = [];
       const has = (re) => re.test(text);
-      if (has(/(^|\\b)(instant|мгновенно)(\\b|$)/)) out.push('INSTANT');
-      if (has(/(^|\\b)(medium|средний)(\\b|$)/) || text.includes('thinking standard')) out.push('MEDIUM');
-      if (text.includes('extra high') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
-      else if (has(/(^|\\b)(high|высокий)(\\b|$)/) || text.includes('thinking extended')) out.push('HIGH');
+      // Locale coverage, same as the picker-identity table: the effort control renders as the
+      // Chinese single character "高" here, and \b does not separate CJK from surrounding text.
+      if (has(/(^|\\b)(instant|мгновенно)(\\b|$)/) || text.includes('即时')) out.push('INSTANT');
+      if (has(/(^|\\b)(medium|средний)(\\b|$)/) || text === '中' || text.includes('thinking standard')) out.push('MEDIUM');
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
+      else if (has(/(^|\\b)(high|высокий)(\\b|$)/) || text === '高' || text.includes('thinking extended')) out.push('HIGH');
       if (text.includes('pro standard')) out.push('PRO_STANDARD');
       if (text.includes('pro extended')) out.push('PRO_EXTENDED');
       if (text === 'thinking') out.push('REASONING_OTHER');

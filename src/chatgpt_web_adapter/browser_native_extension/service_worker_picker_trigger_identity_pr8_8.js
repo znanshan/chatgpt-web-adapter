@@ -57,10 +57,13 @@ function _pr88TriggerIdentityExpression(point, pickerMode) {
       const text = normalize(value);
       if (!text) return [];
       const out = [];
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) out.push('INSTANT');
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text.includes('thinking standard')) out.push('MEDIUM');
-      if (text.includes('extra high') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
-      else if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text.includes('thinking extended')) out.push('HIGH');
+      // Locale coverage: the composer's effort control renders as the Chinese single character
+      // "高" on this deployment. \b does not separate CJK from surrounding text, so the Chinese
+      // labels are matched with includes()/equality rather than the word-boundary regex.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) out.push('INSTANT');
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) out.push('MEDIUM');
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
+      else if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) out.push('HIGH');
       if (text.includes('pro standard')) out.push('PRO_STANDARD');
       if (text.includes('pro extended')) out.push('PRO_EXTENDED');
       if (text === 'thinking') out.push('REASONING_OTHER');
