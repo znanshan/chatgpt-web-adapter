@@ -71,6 +71,32 @@ def test_snapshot_tail_facts_are_content_free_and_cover_terminal_kinds() -> None
     assert "state revision" in worker  # checkpoint / clean-completion evidence
 
 
+def test_capability_loss_detection_covers_the_phrasings_that_actually_occur() -> None:
+    """A session whose plugin is gone must be recognized from the wording the model really uses.
+
+    Measured 2026-09-12: the list held 已禁用 / 无法访问工作区 / 无权限访问, the model wrote
+    "工具被系统禁用" and "Temp … 变为不可用", and the signal never fired -- so the conversation was
+    continued repeatedly even though its tool chain was gone. The scan also covered only the last
+    600 characters while the news was the reply's first line.
+    """
+    import json  # noqa: F401
+    import re as _re
+
+    worker = _read("service_worker_running_monitor.js")
+    start = worker.find("plugin_unavailable:")
+    assert start >= 0, "plugin_unavailable is no longer in the tail facts"
+    end = worker.find("/i.test", start)
+    assert end >= 0, "plugin_unavailable is no longer a literal regex this test can inspect"
+    pattern = worker[start:end]
+    assert "已禁用" in pattern and "无法访问工作区" in pattern
+
+    # The phrasings must appear in the pattern source, in both languages.
+    for phrase in ("工具", "不可用", "变为", "plugin", "tools"):
+        assert phrase in pattern, f"the pattern does not mention {phrase!r}"
+    # And it must scan the whole last turn, not only the tail slice: the news was the FIRST line.
+    assert "(tail +" in worker, "plugin_unavailable still scans only the 600-character tail"
+
+
 def test_snapshot_constants_are_interpolated_never_bare_in_evaluated_expression() -> None:
     worker = _read("service_worker_running_monitor.js")
     # Constants injected into the Runtime.evaluate expression must be template

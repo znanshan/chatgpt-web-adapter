@@ -98,7 +98,15 @@ function _cwaRunMonSnapshotExpression() {
     const tailFacts = {
       tail_len: tailTail.length,
       ends_tool_chain: toolHits >= 3 && endsWithToolMarker && !endsWithPunct,
-      plugin_unavailable: /已禁用|无法访问工作区|无权限访问|plugin.*(unavailable|disabled)|执行端明确返回/i.test(tailTail),
+      // MULTI-LINGUAL AND NOT TAIL-ONLY. Measured 2026-09-12: a session whose plugin was genuinely
+      // gone wrote "工具被系统禁用" and "Temp … 变为不可用", while this list held 已禁用 and the
+      // scan covered only the last 600 characters -- and the sentence carrying the news was the
+      // FIRST line of the reply. So the alternatives were widened and the test now looks at the
+      // whole last turn (see the tail variable), not just the tail slice.
+      //
+      // A bare 不可用 must NOT match: "数据不可用" / "该字段不可用" are project facts. The Chinese
+      // alternatives therefore require a tool/plugin subject or a change of state.
+      plugin_unavailable: /已禁用|无法访问工作区|无权限访问|插件不可用|插件.{0,8}禁用|工具.{0,12}(?:不可用|无法使用|禁用|停用)|(?:变为|变得|变成|仍然|仍|已经|已)(?:是)?[^。\\n]{0,4}?不可用|plugin.*(unavailable|disabled)|tools?.*(unavailable|disabled)|cannot access (?:the )?workspace|no (?:permission|access) to (?:the )?(?:workspace|tools)|执行端明确返回/i.test(tail + ' ' + bannersText),
       checkpoint_ok: /ok\\s*=\\s*true|state revision \\d+|checkpoint/i.test(tailTail),
       ends_punctuated: endsWithPunct,
       length_limit_ui: /长度上限|too long|reached the limit|length limit|对话已达/i.test(bannersText + ' ' + tailTail),
