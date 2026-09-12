@@ -95,6 +95,18 @@ function _cwaRunMonSnapshotExpression() {
     const endsWithToolMarker = /(called tool|tool call)[^\\w]*\\s*$/i.test(tailTail);
     const bannersText = [...document.querySelectorAll('[role="alert"], [data-testid^="banner"]')]
       .map((b) => (b.innerText || '')).join(' ');
+    // THE LENGTH-LIMIT NOTICE LIVES IN THE COMPOSER AREA, NOT IN AN ALERT. Measured 2026-09-12 on OH:
+    // the page ended with "你已达到此对话的长度上限，你可以开始新聊天以继续对话。开始新对话" while
+    // the role=alert and data-testid=banner selectors matched NOTHING and the composer still looked
+    // enabled -- so a banner-only check, which is what this line used to be, could not see the one
+    // notice that means the conversation is over. Scanning the composer region too makes it visible.
+    //
+    // NOTE FOR EDITORS: this file is a template literal, so a backtick anywhere in a comment ENDS the
+    // string early and breaks the whole script. That mistake was made three times; write selector
+    // names without the backtick quotes this file's comments would normally use.
+    const composerRegion = document.querySelector('main form, main');
+    const composerText = composerRegion ? (composerRegion.innerText || '') : '';
+    const noticeText = bannersText + ' ' + composerText.slice(-1200);
     const tailFacts = {
       tail_len: tailTail.length,
       ends_tool_chain: toolHits >= 3 && endsWithToolMarker && !endsWithPunct,
@@ -109,7 +121,7 @@ function _cwaRunMonSnapshotExpression() {
       plugin_unavailable: /已禁用|无法访问工作区|无权限访问|插件不可用|插件.{0,8}禁用|工具.{0,12}(?:不可用|无法使用|禁用|停用)|(?:变为|变得|变成|仍然|仍|已经|已)(?:是)?[^。\\n]{0,4}?不可用|plugin.*(unavailable|disabled)|tools?.*(unavailable|disabled)|cannot access (?:the )?workspace|no (?:permission|access) to (?:the )?(?:workspace|tools)|执行端明确返回/i.test(tail + ' ' + bannersText),
       checkpoint_ok: /ok\\s*=\\s*true|state revision \\d+|checkpoint/i.test(tailTail),
       ends_punctuated: endsWithPunct,
-      length_limit_ui: /长度上限|too long|reached the limit|length limit|对话已达/i.test(bannersText + ' ' + tailTail),
+      length_limit_ui: /已达到此对话的长度上限|此对话的长度上限|达到长度上限|对话已达|开始新聊天以继续|too long to continue|reached the (?:length )?limit|start a new chat to continue|maximum length/i.test(noticeText + ' ' + tailTail),
       content_free: true
     };
     return {
