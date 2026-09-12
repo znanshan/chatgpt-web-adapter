@@ -16,6 +16,7 @@ from .browser_native_protocol import (
     send_local_message,
 )
 from .exceptions import ConversationTimeoutError, RequestError
+from .external_operation import ExternalOperationError, ExternalOperationEvent
 from .types import ChatConversation, ConversationRef
 
 
@@ -61,6 +62,14 @@ class BrowserNativeRuntimeTabReleaseResult:
     already_absent: bool
     runtime_tab_id: int | None
     browser_authority_lease_id: str
+
+
+@dataclass(frozen=True)
+class BrowserNativeExternalOperationBatch:
+    operation_id: str
+    events: tuple[ExternalOperationEvent, ...]
+    next_cursor: str | None
+    has_more: bool
 
 
 class BrowserNativeTurnProvider:
@@ -300,6 +309,117 @@ class BrowserNativeTurnProvider:
             for key, value in response.items()
             if key not in {"protocol", "type", "request_id"}
         }
+
+    @staticmethod
+    def _external_operation_id(value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("operation_id must be a non-empty string")
+        return value.strip()
+
+    def start_external_operation_observation(
+        self, operation_id: str, *, timeout: float = 5.0
+    ) -> dict[str, Any]:
+        """Start one bounded page-owned observation without submitting a turn."""
+        operation_id = self._external_operation_id(operation_id)
+        result = self.characterize_control(
+            action="start", session_id=operation_id, timeout=timeout
+        )
+        if result.get("session_id") != operation_id:
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        return result
+
+    def read_external_operation_events(
+        self,
+        operation_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 200,
+        timeout: float = 5.0,
+    ) -> BrowserNativeExternalOperationBatch:
+        """Read content-free v2 frames; cursor gaps and observer loss fail closed."""
+        operation_id = self._external_operation_id(operation_id)
+        if cursor is not None and (not isinstance(cursor, str) or not cursor):
+            raise ValueError("cursor must be a non-empty string or None")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not (1 <= limit <= 500):
+            raise ValueError("limit must be an integer between 1 and 500")
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        request_id = str(uuid.uuid4())
+        response = self._rpc(
+            {
+                "type": "external_operation_events",
+                "request_id": request_id,
+                "operation_id": operation_id,
+                "cursor": cursor,
+                "limit": limit,
+                "timeoutMs": int(timeout * 1000),
+            },
+            timeout=timeout + self.connect_timeout,
+        )
+        if response.get("request_id") != request_id:
+            raise RequestError(
+                "BROWSER_NATIVE_RESPONSE_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        if not response.get("ok"):
+            raise RequestError(
+                str(response.get("error") or "BROWSER_NATIVE_EXTERNAL_OPERATION_READ_FAILED"),
+                request_stage="browser_native_external_operation",
+            )
+        if response.get("operation_id") != operation_id:
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        raw_events = response.get("events")
+        if not isinstance(raw_events, list):
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_EVENTS_INVALID",
+                request_stage="browser_native_external_operation",
+            )
+        try:
+            events = tuple(ExternalOperationEvent.from_dict(item) for item in raw_events)
+        except (ExternalOperationError, TypeError, ValueError) as error:
+            raise RequestError(
+                f"BROWSER_NATIVE_EXTERNAL_OPERATION_FRAME_INVALID:{error}",
+                request_stage="browser_native_external_operation",
+            ) from error
+        next_cursor = response.get("next_cursor")
+        if next_cursor is not None and not isinstance(next_cursor, str):
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_CURSOR_INVALID",
+                request_stage="browser_native_external_operation",
+            )
+        has_more = response.get("has_more")
+        if not isinstance(has_more, bool):
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_PAGINATION_INVALID",
+                request_stage="browser_native_external_operation",
+            )
+        return BrowserNativeExternalOperationBatch(
+            operation_id=operation_id,
+            events=events,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
+    def stop_external_operation_observation(
+        self, operation_id: str, *, timeout: float = 5.0
+    ) -> dict[str, Any]:
+        """Stop only the matching observation; another operation is never mutated."""
+        operation_id = self._external_operation_id(operation_id)
+        result = self.characterize_control(
+            action="stop", session_id=operation_id, timeout=timeout
+        )
+        if result.get("session_id") != operation_id:
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        return result
 
     def observe_list_surface(self, *, timeout: float = 8.0) -> dict[str, Any]:
         """Ensure the resident list surface (dedicated ChatGPT root page) and

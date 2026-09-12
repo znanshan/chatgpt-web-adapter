@@ -48,6 +48,28 @@ def test_frame_rejects_content_in_public_metadata() -> None:
     assert event.to_dict()["metadata"]["http_status"] == 202
 
 
+def test_frame_from_dict_validates_public_wire_protocol_and_error_shape() -> None:
+    payload = _event().to_dict()
+    assert ExternalOperationEvent.from_dict(payload) == _event()
+
+    with pytest.raises(ExternalOperationError, match="protocol"):
+        ExternalOperationEvent.from_dict({**payload, "protocol": 1})
+    with pytest.raises(ExternalOperationError, match="unexpected"):
+        ExternalOperationEvent.from_dict({**payload, "raw_payload": "forbidden"})
+    with pytest.raises(ExternalOperationError, match="structured error"):
+        ExternalOperationEvent.from_dict({
+            **payload,
+            "status": "retryable",
+            "error": {"code": "DELIVERY_TIMEOUT"},
+        })
+    retryable = ExternalOperationEvent.from_dict({
+        **payload,
+        "status": "retryable",
+        "error": {"code": "DELIVERY_TIMEOUT", "retryable": True},
+    })
+    assert retryable.error == {"code": "DELIVERY_TIMEOUT", "retryable": True}
+
+
 def test_cursor_is_deterministic() -> None:
     assert cursor_for("op-1", 3) == "op-1:3"
     assert cursor_for("op-1", 3) == cursor_for("op-1", 3)

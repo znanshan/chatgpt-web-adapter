@@ -13,8 +13,11 @@ from .auth_refresh import (
 )
 from .auth_status import AuthStatus, get_auth_status
 from .browser_native_client import (
+    read_external_operation_events as _read_external_operation_events,
     send_browser_native as _send_browser_native,
     set_browser_native_turn_provider as _set_browser_native_turn_provider,
+    start_external_operation_observation as _start_external_operation_observation,
+    stop_external_operation_observation as _stop_external_operation_observation,
 )
 from .browser_native_install import (
     BrowserNativeInstallResult,
@@ -186,6 +189,9 @@ ChatGPTWebClient.set_sentinel_challenge_provider = _set_sentinel_challenge_provi
 ChatGPTWebClient.set_sentinel_bundle_provider = _set_sentinel_bundle_provider
 ChatGPTWebClient.set_browser_native_turn_provider = _set_browser_native_turn_provider
 ChatGPTWebClient.send_browser_native = _send_browser_native
+ChatGPTWebClient.start_external_operation_observation = _start_external_operation_observation
+ChatGPTWebClient.read_external_operation_events = _read_external_operation_events
+ChatGPTWebClient.stop_external_operation_observation = _stop_external_operation_observation
 ChatGPTWebClient.refresh_auth = _refresh_auth_session
 ChatGPTWebClient._build_headers = _gate_prepared_build_headers(_original_build_headers)
 ChatGPTWebClient._sanitize_header_value = _redact_ephemeral_write_headers(
