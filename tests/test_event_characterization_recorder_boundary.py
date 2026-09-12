@@ -57,6 +57,21 @@ def test_recorder_handles_characterize_native_message() -> None:
     assert "_get_conversation_payload" not in worker
 
 
+def test_recorder_projects_private_evidence_to_public_v2_external_operation_frames() -> None:
+    worker = _read("service_worker_event_characterization_recorder.js")
+    assert 'message?.type === "external_operation_events"' in worker
+    assert 'type: "external_operation_events_result"' in worker
+    assert "source_seq" in worker
+    assert "EXTERNAL_OPERATION_CURSOR_GAP" in worker
+    assert "EXTERNAL_OPERATION_CURSOR_AHEAD" in worker
+    assert "EXTERNAL_OPERATION_SOURCE_SEQUENCE_MISSING" in worker
+    assert "CHARACTERIZE_SESSION_MISMATCH" in worker
+    assert "EXTERNAL_OPERATION_OBSERVER_LOST" in worker
+    assert "protocol: 2" in worker
+    projection = worker[worker.index('message?.type === "external_operation_events"'):]
+    assert "events: _cwaCharEvents" not in projection
+
+
 def test_recorder_observes_websocket_frames_content_free() -> None:
     worker = _read("service_worker_event_characterization_recorder.js")
     # The real-time conversation stream may ride a WebSocket instead of base64

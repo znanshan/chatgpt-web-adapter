@@ -52,6 +52,50 @@ def set_browser_native_turn_provider(self: Any, provider: BrowserNativeTurnProvi
     self._browser_native_turn_provider = provider
 
 
+def _external_operation_provider(self: Any) -> BrowserNativeTurnProvider:
+    provider = getattr(self, "_browser_native_turn_provider", None)
+    required = (
+        "start_external_operation_observation",
+        "read_external_operation_events",
+        "stop_external_operation_observation",
+    )
+    if provider is None or any(not callable(getattr(provider, name, None)) for name in required):
+        raise RequestError(
+            "BROWSER_NATIVE_BRIDGE_UNAVAILABLE: external-operation observer not configured",
+            request_stage="browser_native_external_operation",
+        )
+    return provider
+
+
+def start_external_operation_observation(
+    self: Any, operation_id: str, *, timeout: float = 5.0
+):
+    return _external_operation_provider(self).start_external_operation_observation(
+        operation_id, timeout=timeout
+    )
+
+
+def read_external_operation_events(
+    self: Any,
+    operation_id: str,
+    *,
+    cursor: str | None = None,
+    limit: int = 200,
+    timeout: float = 5.0,
+):
+    return _external_operation_provider(self).read_external_operation_events(
+        operation_id, cursor=cursor, limit=limit, timeout=timeout
+    )
+
+
+def stop_external_operation_observation(
+    self: Any, operation_id: str, *, timeout: float = 5.0
+):
+    return _external_operation_provider(self).stop_external_operation_observation(
+        operation_id, timeout=timeout
+    )
+
+
 def _assistant_message_ids(self: Any, conversation: Any) -> set[str]:
     messages = self.get_messages(
         conversation,

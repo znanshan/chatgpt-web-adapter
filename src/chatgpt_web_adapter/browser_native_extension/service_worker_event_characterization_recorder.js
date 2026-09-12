@@ -27,6 +27,7 @@ let _cwaCharActive = false;
 let _cwaCharSessionId = null;
 let _cwaCharStartedAtMs = null;
 let _cwaCharSeq = 0;
+let _cwaCharSourceSeq = new Map();
 let _cwaCharBytes = 0;
 let _cwaCharEvents = [];
 let _cwaCharDomTimer = null;
@@ -75,6 +76,11 @@ function _cwaCharConversationIdFromUrl(url) {
 }
 
 function _cwaCharPush(entry) {
+  const rawSource = typeof entry?.source === "string" && entry.source ? entry.source : "session";
+  const publicSource = rawSource === "dom" || rawSource === "tab" ? "page" : rawSource;
+  const sourceSeq = _cwaCharSourceSeq.get(publicSource) || 0;
+  entry.source_seq = sourceSeq;
+  _cwaCharSourceSeq.set(publicSource, sourceSeq + 1);
   entry.seq = _cwaCharSeq;
   entry.t = _cwaCharNow();
   _cwaCharSeq += 1;
@@ -209,13 +215,18 @@ function _cwaCharNetworkEvent(source, method, params) {
       sse_event_types: types, sse_paths: paths
     });
   } else if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
+    const requestId = typeof params?.requestId === "string" ? params.requestId : null;
+    const isWrite = requestId !== null && _cwaCharWriteRequestIds.has(requestId);
     _cwaCharPush({
       source: "network",
       method,
       tabId,
+      request_id: requestId,
+      is_conversation_write: isWrite,
       encoded_bytes: Number.isFinite(params?.encodedDataLength) ? params.encodedDataLength : null,
       error: method === "Network.loadingFailed" ? (params?.errorText || null) : null
     });
+    if (requestId !== null) _cwaCharWriteRequestIds.delete(requestId);
   } else if (method === "Network.webSocketCreated") {
     const url = typeof params?.url === "string" ? params.url : "";
     const kind = _cwaCharUrlKind(url);
@@ -360,6 +371,7 @@ function _cwaCharStart(sessionId) {
   _cwaCharSessionId = sessionId || null;
   _cwaCharStartedAtMs = _cwaCharNow();
   _cwaCharSeq = 0;
+  _cwaCharSourceSeq = new Map();
   _cwaCharBytes = 0;
   _cwaCharEvents = [];
   _cwaCharDomSamples = 0;
@@ -459,12 +471,211 @@ async function _cwaCharDump() {
   }
 }
 
+function _cwaCharExternalEventTypeFromPaths(paths) {
+  if (!Array.isArray(paths)) return null;
+  if (paths.includes("/message/end_turn")) return "end_turn";
+  if (paths.includes("/message/status")) return "status_update";
+  if (paths.includes("/message/metadata")) return "metadata_update";
+  if (paths.includes("/message/content/parts/0")) return "text_delta";
+  if (paths.includes("/message/content")) return "content_update";
+  return null;
+}
+
+function _cwaCharExternalSource(entry) {
+  if (entry?.source === "network") return "network";
+  if (entry?.source === "session") return "session";
+  return "page";
+}
+
+function _cwaCharExternalEventType(entry) {
+  if (entry?.source === "session") return "session";
+  if (entry?.source === "dom") return "page_state";
+  if (entry?.source === "tab") {
+    return entry?.kind === "tab_updated" && typeof entry?.conversation_id === "string"
+      ? "route_change"
+      : "page_state";
+  }
+  const method = entry?.method;
+  if (method === "Network.requestWillBeSent" && entry?.is_conversation_write === true) {
+    return "turn_submitted";
+  }
+  if (method === "Network.responseReceived") {
+    return entry?.is_conversation_write === true && Number(entry?.status) === 429
+      ? "rate_limited"
+      : "http_status";
+  }
+  if (
+    method === "Network.dataReceived" ||
+    method === "Network.streamResourceContent" ||
+    method === "Network.webSocketFrameReceived" ||
+    method === "Network.webSocketFrameSent"
+  ) {
+    return _cwaCharExternalEventTypeFromPaths(entry?.sse_paths) || "stream_data";
+  }
+  if (method === "Network.loadingFinished" || method === "Network.webSocketClosed") {
+    return "stream_finished";
+  }
+  if (method === "Network.loadingFailed" || method === "Network.webSocketFrameError") {
+    return "stream_failed";
+  }
+  return "stream_data";
+}
+
+function _cwaCharExternalMetadata(entry) {
+  const metadata = {};
+  const assign = (key, value) => {
+    if (value !== null && value !== undefined) metadata[key] = value;
+  };
+  assign("network_method", typeof entry?.method === "string" ? entry.method : null);
+  assign("network_request_id", typeof entry?.request_id === "string" ? entry.request_id : null);
+  assign("url_kind", typeof entry?.url_kind === "string" ? entry.url_kind : null);
+  assign("request_method", typeof entry?.http_method === "string" ? entry.http_method : null);
+  assign("resource_type", typeof entry?.resource_type === "string" ? entry.resource_type : null);
+  assign("is_conversation_write", typeof entry?.is_conversation_write === "boolean" ? entry.is_conversation_write : null);
+  assign("http_status", Number.isFinite(entry?.status) ? Number(entry.status) : null);
+  assign("mime", typeof entry?.mime === "string" ? entry.mime : null);
+  assign("bytes", Number.isFinite(entry?.bytes) ? Number(entry.bytes) : null);
+  assign("encoded_bytes", Number.isFinite(entry?.encoded_bytes) ? Number(entry.encoded_bytes) : null);
+  assign("buffered_bytes", Number.isFinite(entry?.buffered_bytes) ? Number(entry.buffered_bytes) : null);
+  assign("frame_bytes", Number.isFinite(entry?.payload_bytes) ? Number(entry.payload_bytes) : null);
+  assign("sse_event_types", Array.isArray(entry?.sse_event_types) ? [...entry.sse_event_types] : null);
+  assign("sse_paths", Array.isArray(entry?.sse_paths) ? [...entry.sse_paths] : null);
+  assign("ws_kind", typeof entry?.ws_kind === "string" ? entry.ws_kind : null);
+  assign("opcode", Number.isInteger(entry?.opcode) ? entry.opcode : null);
+  assign("close_code", Number.isInteger(entry?.close_code) ? entry.close_code : null);
+  assign("tab_id", Number.isInteger(entry?.tabId) ? entry.tabId : null);
+  assign("page_event_kind", typeof entry?.kind === "string" ? entry.kind : null);
+  assign("visible", typeof entry?.visible === "boolean" ? entry.visible : null);
+  if (entry?.dom && typeof entry.dom === "object") {
+    assign("turns", Number.isInteger(entry.dom.turns) ? entry.dom.turns : null);
+    assign("stop", typeof entry.dom.stop === "boolean" ? entry.dom.stop : null);
+    assign("composer", typeof entry.dom.composer === "boolean" ? entry.dom.composer : null);
+    assign("banners", Array.isArray(entry.dom.banners) ? [...entry.dom.banners] : null);
+  }
+  return metadata;
+}
+
+function _cwaCharExternalError(eventType) {
+  if (eventType === "rate_limited") {
+    return { code: "HTTP_429", retryable: true };
+  }
+  if (eventType === "stream_failed") {
+    return { code: "OBSERVATION_STREAM_FAILED", retryable: true };
+  }
+  return null;
+}
+
+function _cwaCharExternalStatus(eventType) {
+  if (eventType === "rate_limited") return "retryable";
+  if (eventType === "stream_failed") return "failed";
+  if (eventType === "end_turn") return "completed";
+  return "running";
+}
+
+function _cwaCharExternalCursor(operationId, rawSeq) {
+  return `${operationId}:${rawSeq}`;
+}
+
+function _cwaCharParseExternalCursor(operationId, cursor) {
+  if (cursor === null || cursor === undefined) return -1;
+  if (typeof cursor !== "string" || !cursor.startsWith(`${operationId}:`)) {
+    throw new Error("EXTERNAL_OPERATION_CURSOR_MISMATCH");
+  }
+  const raw = cursor.slice(operationId.length + 1);
+  if (!/^\d+$/.test(raw)) throw new Error("EXTERNAL_OPERATION_CURSOR_MISMATCH");
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error("EXTERNAL_OPERATION_CURSOR_MISMATCH");
+  return value;
+}
+
+async function _cwaCharExternalSnapshot(operationId) {
+  if (_cwaCharSessionId === operationId && (_cwaCharActive || _cwaCharEvents.length > 0)) {
+    return { session_id: operationId, events: [..._cwaCharEvents] };
+  }
+  const stored = await chrome.storage.local.get(CWA_CHARACTERIZATION_KEY);
+  const log = stored?.[CWA_CHARACTERIZATION_KEY];
+  if (!log || typeof log !== "object" || log.session_id !== operationId) {
+    throw new Error("EXTERNAL_OPERATION_NOT_FOUND");
+  }
+  if (log.active === true) {
+    throw new Error("EXTERNAL_OPERATION_OBSERVER_LOST");
+  }
+  return {
+    session_id: log.session_id,
+    events: Array.isArray(log.events) ? [...log.events] : []
+  };
+}
+
+function _cwaCharProjectExternalEvent(operationId, entry) {
+  if (!Number.isInteger(entry?.seq) || entry.seq < 0) {
+    throw new Error("EXTERNAL_OPERATION_SEQUENCE_INVALID");
+  }
+  if (!Number.isInteger(entry?.source_seq) || entry.source_seq < 0) {
+    throw new Error("EXTERNAL_OPERATION_SOURCE_SEQUENCE_MISSING");
+  }
+  const eventType = _cwaCharExternalEventType(entry);
+  return {
+    protocol: 2,
+    type: "turn_event",
+    operation_id: operationId,
+    conversation_ref: typeof entry?.conversation_id === "string" ? entry.conversation_id : null,
+    attempt_id: null,
+    turn_id: null,
+    event_seq: entry.source_seq,
+    source: _cwaCharExternalSource(entry),
+    event_type: eventType,
+    t_ms: Number.isFinite(entry?.t) ? Number(entry.t) : _cwaCharNow(),
+    status: _cwaCharExternalStatus(eventType),
+    cursor: _cwaCharExternalCursor(operationId, entry.seq),
+    metadata: _cwaCharExternalMetadata(entry),
+    error: _cwaCharExternalError(eventType)
+  };
+}
+
+async function _cwaCharExternalOperationEvents(operationId, cursor, limit) {
+  try {
+    if (typeof operationId !== "string" || !operationId.trim()) {
+      throw new Error("EXTERNAL_OPERATION_ID_REQUIRED");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("EXTERNAL_OPERATION_LIMIT_INVALID");
+    }
+    const normalizedId = operationId.trim();
+    const afterSeq = _cwaCharParseExternalCursor(normalizedId, cursor);
+    const snapshot = await _cwaCharExternalSnapshot(normalizedId);
+    const events = snapshot.events
+      .filter((entry) => entry && Number.isInteger(entry.seq))
+      .sort((left, right) => left.seq - right.seq);
+    if (events.length === 0) {
+      if (afterSeq >= 0) throw new Error("EXTERNAL_OPERATION_CURSOR_AHEAD");
+      return { ok: true, operation_id: normalizedId, events: [], next_cursor: cursor ?? null, has_more: false };
+    }
+    const firstSeq = events[0].seq;
+    const lastSeq = events[events.length - 1].seq;
+    if (afterSeq > lastSeq) throw new Error("EXTERNAL_OPERATION_CURSOR_AHEAD");
+    if (firstSeq > afterSeq + 1) throw new Error("EXTERNAL_OPERATION_CURSOR_GAP");
+    const remaining = events.filter((entry) => entry.seq > afterSeq);
+    const selected = remaining.slice(0, limit);
+    const publicEvents = selected.map((entry) => _cwaCharProjectExternalEvent(normalizedId, entry));
+    return {
+      ok: true,
+      operation_id: normalizedId,
+      events: publicEvents,
+      next_cursor: publicEvents.length > 0 ? publicEvents[publicEvents.length - 1].cursor : (cursor ?? null),
+      has_more: remaining.length > selected.length
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function _cwaCharClear() {
   try {
     await chrome.storage.local.remove(CWA_CHARACTERIZATION_KEY);
     _cwaCharEvents = [];
     _cwaCharBytes = 0;
     _cwaCharSeq = 0;
+    _cwaCharSourceSeq = new Map();
     _cwaCharWsKinds.clear();
     return { ok: true };
   } catch (error) {
@@ -486,6 +697,20 @@ function _cwaCharStatus() {
 
 const _cwaCharPriorOnNativeMessage = onNativeMessage;
 onNativeMessage = async function _onNativeMessageWithCharacterizationRecorder(message, port) {
+  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_events") {
+    const reply = await _cwaCharExternalOperationEvents(
+      message.operation_id,
+      message.cursor ?? null,
+      message.limit
+    );
+    safePortPost(port, {
+      protocol: BRIDGE_PROTOCOL_VERSION,
+      type: "external_operation_events_result",
+      request_id: message.request_id,
+      ...reply
+    });
+    return;
+  }
   if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "characterize") {
     const action = message.action;
     const requestId = message.request_id;
@@ -495,7 +720,14 @@ onNativeMessage = async function _onNativeMessageWithCharacterizationRecorder(me
         typeof message.session_id === "string" && message.session_id ? message.session_id : null
       );
     } else if (action === "stop") {
-      reply = await _cwaCharStop();
+      const requestedSession = typeof message.session_id === "string" && message.session_id
+        ? message.session_id
+        : null;
+      if (requestedSession !== null && requestedSession !== _cwaCharSessionId) {
+        reply = { ok: false, error: "CHARACTERIZE_SESSION_MISMATCH" };
+      } else {
+        reply = await _cwaCharStop();
+      }
     } else if (action === "dump") {
       reply = await _cwaCharDump();
     } else if (action === "clear") {

@@ -67,6 +67,45 @@ def test_characterize_is_allowed_and_not_blocked_by_active_writer(monkeypatch, t
     assert result["active"] is False
 
 
+def test_external_operation_events_is_a_read_not_blocked_by_active_writer(monkeypatch, tmp_path) -> None:
+    import chatgpt_web_adapter.browser_native_host as subject
+
+    broker = BrowserNativeBroker(state_dir=tmp_path)
+    broker.extension_connected = True
+
+    def fake_write(stream, forwarded):
+        broker.route_native_message({
+            "protocol": 1,
+            "type": "external_operation_events_result",
+            "request_id": forwarded["request_id"],
+            "ok": True,
+            "operation_id": forwarded["operation_id"],
+            "events": [],
+            "next_cursor": forwarded.get("cursor"),
+            "has_more": False,
+        })
+
+    monkeypatch.setattr(subject, "write_native_message", fake_write)
+    broker.turn_lock.acquire()
+    try:
+        result = broker.handle_local_request({
+            "protocol": 1,
+            "token": broker.token,
+            "type": "external_operation_events",
+            "operation_id": "operation-1",
+            "cursor": None,
+            "limit": 50,
+            "request_id": "external-read-while-writing",
+            "timeoutMs": 1000,
+        })
+    finally:
+        broker.turn_lock.release()
+        broker._server.server_close()
+
+    assert result["ok"] is True
+    assert result["operation_id"] == "operation-1"
+
+
 def test_observation_is_not_blocked_by_an_active_writer(monkeypatch, tmp_path) -> None:
     import chatgpt_web_adapter.browser_native_host as subject
 

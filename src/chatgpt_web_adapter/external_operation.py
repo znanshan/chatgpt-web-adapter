@@ -106,6 +106,58 @@ class ExternalOperationEvent:
         if leaked:
             raise ContentLeak(f"public frame metadata carries content keys: {sorted(leaked)}")
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ExternalOperationEvent":
+        if not isinstance(payload, dict):
+            raise ExternalOperationError("external-operation frame must be an object")
+        if payload.get("protocol") != PROTOCOL_V2:
+            raise ExternalOperationError(f"external-operation protocol mismatch: {payload.get('protocol')}")
+        if payload.get("type") != "turn_event":
+            raise ExternalOperationError(f"unexpected external-operation frame type: {payload.get('type')}")
+        allowed = {
+            "protocol", "type", "operation_id", "conversation_ref", "attempt_id",
+            "turn_id", "event_seq", "source", "event_type", "t_ms", "status",
+            "cursor", "metadata", "error",
+        }
+        extra = set(payload) - allowed
+        if extra:
+            raise ExternalOperationError(f"unexpected external-operation frame fields: {sorted(extra)}")
+        metadata = payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ExternalOperationError("external-operation metadata must be an object")
+        error = payload.get("error")
+        if payload.get("status") in {"failed", "retryable"} and error is None:
+            raise ExternalOperationError("failed/retryable public frames require a structured error")
+        if error is not None:
+            if (
+                not isinstance(error, dict)
+                or not isinstance(error.get("code"), str)
+                or not error.get("code")
+                or not isinstance(error.get("retryable"), bool)
+            ):
+                raise ExternalOperationError(
+                    "structured error requires non-empty code and boolean retryable"
+                )
+        required = ("operation_id", "event_seq", "source", "event_type", "t_ms", "cursor")
+        missing = [key for key in required if key not in payload]
+        if missing:
+            raise ExternalOperationError(f"external-operation frame missing fields: {missing}")
+        return cls(
+            operation_id=payload["operation_id"],
+            conversation_ref=payload.get("conversation_ref"),
+            attempt_id=payload.get("attempt_id"),
+            turn_id=payload.get("turn_id"),
+            event_seq=payload["event_seq"],
+            source=payload["source"],
+            event_type=payload["event_type"],
+            t_ms=payload["t_ms"],
+            status=payload.get("status", "running"),
+            cursor=payload["cursor"],
+            metadata=metadata,
+            error=error,
+            protocol=payload["protocol"],
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "protocol": self.protocol,
