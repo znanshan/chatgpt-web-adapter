@@ -298,6 +298,55 @@ function _pr88InstantModeSnapshotExpression() {
     }
     candidates.sort((a, b) => a.distance - b.distance);
     if (!candidates.length) {
+      // AN OPEN PICKER CARRIES THE MODE ON ITS SLIDER, NOT ON THE CONTROL'S LABEL. Measured 2026-09-13 on
+      // OH: the composer pill reads the level while CLOSED (中) and the picker's SECTION TITLE while OPEN
+      // (思考强度), so this expression -- which every model-profile step trusts for "what mode is selected"
+      // -- answered no_mode_control at exactly the moment a mode had just been selected. The write then
+      // died with PR8_10_MODEL_PROFILE_DID_NOT_SETTLE:HIGH after Home + ArrowRight x2 had in fact landed.
+      //
+      // The identification is the 3-step effort slider itself: min=0, max=2, and the picker lays the three
+      // levels out in order, so the thumb's value IS the mode. Nothing else in the composer has that
+      // slider, and it must sit within 400px of an OPEN composer pill within 800px of the composer.
+      const openPills = Array.from(
+        document.querySelectorAll('button.__composer-pill,[role="button"].__composer-pill')
+      ).filter(visible).filter((el) => (
+        el.getAttribute('aria-expanded') === 'true' ||
+        normalize(el.getAttribute('data-state')) === 'open'
+      )).filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const dx = Math.max(0, Math.max(composerRect.left - rect.right, rect.left - composerRect.right));
+        const dy = Math.max(0, Math.max(composerRect.top - rect.bottom, rect.top - composerRect.bottom));
+        return Math.sqrt(dx * dx + dy * dy) <= 800;
+      });
+      const sliders = [];
+      for (const el of Array.from(document.querySelectorAll('[role="slider"],input[type="range"]')).filter(visible)) {
+        const rect = el.getBoundingClientRect();
+        const min = Number(el.getAttribute('aria-valuemin') ?? el.min);
+        const max = Number(el.getAttribute('aria-valuemax') ?? el.max);
+        const now = Number(el.getAttribute('aria-valuenow') ?? el.value);
+        if (!(Number.isInteger(min) && Number.isInteger(max) && Number.isInteger(now))) continue;
+        if (!(min === 0 && max === 2 && now >= 0 && now <= 2)) continue;
+        const nearPill = openPills.some((pill) => {
+          const pr = pill.getBoundingClientRect();
+          const sx = (rect.left + rect.width / 2) - (pr.left + pr.width / 2);
+          const sy = (rect.top + rect.height / 2) - (pr.top + pr.height / 2);
+          return Math.sqrt(sx * sx + sy * sy) <= 400;
+        });
+        if (nearPill) sliders.push({ now, distance: Math.round(Math.hypot(
+          (rect.left + rect.width / 2) - (composerRect.left + composerRect.width / 2),
+          (rect.top + rect.height / 2) - (composerRect.top + composerRect.height / 2))) });
+      }
+      sliders.sort((a, b) => a.distance - b.distance);
+      if (sliders.length === 1) {
+        return {
+          composerReady: true,
+          selectedMode: ['INSTANT', 'MEDIUM', 'HIGH'][sliders[0].now],
+          selectedModeProven: true,
+          candidateCount: 1,
+          nearestDistancePx: sliders[0].distance,
+          proofKind: 'open_effort_slider_value'
+        };
+      }
       return { composerReady: true, selectedMode: null, selectedModeProven: false, candidateCount: 0, proofKind: 'no_mode_control' };
     }
     const nearest = candidates[0];

@@ -278,6 +278,16 @@ def test_an_open_effort_picker_still_has_an_identifiable_control():
         assert "distance<=800" in text or "distance <= 800" in text, f"{name} lost the composer distance"
         assert "distance<=400" in text or "distance > 400" in text, f"{name} lost the slider distance"
 
+    # AND THE AUTHORITATIVE "which mode is selected" READING. Every model-profile step trusts it, and it
+    # carried the same blind spot: while the picker is open it answered no_mode_control at exactly the
+    # moment a mode had just been selected, so the write died with
+    # PR8_10_MODEL_PROFILE_DID_NOT_SETTLE:HIGH after Home + ArrowRight x2 had in fact landed.
+    mode_text = (root / "service_worker_instant_mode_pr8_8.js").read_text(encoding="utf-8")
+    assert "open_effort_slider_value" in mode_text, (
+        "the selected-mode reading must fall back to the open picker's slider value")
+    assert "__composer-pill" in mode_text and "aria-valuenow" in mode_text, (
+        "that fallback must identify the open pill and read the slider's own value")
+
 
 def test_provider_parses_lease_fenced_selection_record(monkeypatch):
     provider = InstantSelectionRepairProvider()
