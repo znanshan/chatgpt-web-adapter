@@ -102,3 +102,16 @@ def test_native_bridge_starts_only_after_production_router_is_installed() -> Non
     assert marker in legacy
     after_listeners = legacy.split(marker, 1)[1]
     assert "\nconnectNativeBridge();" not in after_listeners.split("// Transitional Task-5 boundary:", 1)[0]
+
+
+def test_turn_executor_has_one_immutable_production_owner() -> None:
+    legacy = (PRODUCTION / "legacy_runtime.js").read_text(encoding="utf-8")
+    assert "async function executeNativeTurn(" not in legacy
+    assert "executeNativeTurn =" not in legacy
+    assert not re.search(r"const\s+\w+\s*=\s*executeNativeTurn\s*;", legacy)
+    stages = re.findall(r"const (_productionTurnStage\d{2}) =", legacy)
+    assert len(stages) == 64
+    assert stages == [f"_productionTurnStage{index:02d}" for index in range(1, 65)]
+    assert "const composedTurnExecutor = _productionTurnStage64;" in legacy
+    assert "executeTurn: composedTurnExecutor" in legacy
+    assert "await composedTurnExecutor(message)" in legacy
