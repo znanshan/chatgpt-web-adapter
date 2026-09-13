@@ -333,6 +333,9 @@ function _cwaCharDomProbeExpression() {
     const stop = Boolean(document.querySelector(
       'button[data-testid="stop-button"], button[aria-label="Stop generating"]'
     ));
+    const retry = Boolean(document.querySelector(
+      'button[data-testid*="retry"], button[data-testid*="regenerate"], button[data-testid*="try-again"]'
+    ));
     const composer = Boolean(
       document.querySelector('#prompt-textarea, div[contenteditable="true"]')
     );
@@ -342,7 +345,7 @@ function _cwaCharDomProbeExpression() {
       if (name && !banners.includes(name)) banners.push(name);
       if (banners.length >= 4) break;
     }
-    return { main_ready: Boolean(main), turns, stop, composer, banners };
+    return { main_ready: Boolean(main), turns, stop, retry, composer, banners };
   })()`;
 }
 
@@ -654,6 +657,7 @@ function _cwaCharExternalMetadata(entry) {
   if (entry?.dom && typeof entry.dom === "object") {
     assign("turns", Number.isInteger(entry.dom.turns) ? entry.dom.turns : null);
     assign("stop", typeof entry.dom.stop === "boolean" ? entry.dom.stop : null);
+    assign("retry", typeof entry.dom.retry === "boolean" ? entry.dom.retry : null);
     assign("composer", typeof entry.dom.composer === "boolean" ? entry.dom.composer : null);
     assign("banners", Array.isArray(entry.dom.banners) ? [...entry.dom.banners] : null);
   }
