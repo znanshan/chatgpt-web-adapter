@@ -189,7 +189,19 @@ const quietTerminal = vm.runInContext(`_cwaCharExternalAggregate("op", ${JSON.st
   event(1,"Network.dataReceived",now-6500,true),
   event(2,"Network.loadingFinished",now-5000,true),
 ])}, null)`, context);
-process.stdout.write(JSON.stringify({background,recentTerminal,quietTerminal}));
+const backgroundFailure = vm.runInContext(`_cwaCharExternalAggregate("op", ${JSON.stringify([
+  event(0,"Network.requestWillBeSent",now-1500,true),
+  event(1,"Network.loadingFailed",now-1200,false),
+])}, null)`, context);
+const writeFailure = vm.runInContext(`_cwaCharExternalAggregate("op", ${JSON.stringify([
+  event(0,"Network.requestWillBeSent",now-1500,true),
+  event(1,"Network.loadingFailed",now-1200,true),
+])}, null)`, context);
+const websocketNoise = vm.runInContext(`_cwaCharExternalAggregate("op", ${JSON.stringify([
+  event(0,"Network.requestWillBeSent",now-1500,true),
+  event(1,"Network.webSocketFrameError",now-1200,false),
+])}, null)`, context);
+process.stdout.write(JSON.stringify({background,recentTerminal,quietTerminal,backgroundFailure,writeFailure,websocketNoise}));
 """
     completed = subprocess.run(
         [node, "-e", harness, str(RECORDER)],
@@ -202,3 +214,9 @@ process.stdout.write(JSON.stringify({background,recentTerminal,quietTerminal}));
     assert probe["recentTerminal"]["status"] == "running"
     assert probe["quietTerminal"]["status"] == "completed"
     assert probe["quietTerminal"]["terminal_markers"] == 1
+    assert probe["backgroundFailure"]["status"] == "running"
+    assert probe["backgroundFailure"]["failed"] is False
+    assert probe["writeFailure"]["status"] == "failed"
+    assert probe["writeFailure"]["failed"] is True
+    assert probe["websocketNoise"]["status"] == "running"
+    assert probe["websocketNoise"]["failed"] is False
