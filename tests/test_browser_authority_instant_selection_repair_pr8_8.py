@@ -135,9 +135,8 @@ def test_extension_selection_layer_preserves_manifest_and_import_order():
     root = browser_native_extension_dir()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == "0.1.20"
-    assert manifest["background"]["service_worker"] == (
-        "service_worker_entry_v3.js"
-    )
+    assert manifest["background"]["service_worker"] == "production/service_worker_entry.js"
+    assert manifest["background"].get("type") == "module"
 
     observability = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     phase_import = 'importScripts("service_worker_phase_timing_pr8_8.js")'

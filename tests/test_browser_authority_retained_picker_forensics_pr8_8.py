@@ -170,7 +170,8 @@ def test_extension_forensics_layer_is_additive_and_contains_no_product_ui_mutati
     root = browser_native_extension_dir()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == "0.1.20"
-    assert manifest["background"]["service_worker"] == "service_worker_entry_v3.js"
+    assert manifest["background"]["service_worker"] == "production/service_worker_entry.js"
+    assert manifest["background"].get("type") == "module"
 
     observability = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     worker = (root / "service_worker_retained_picker_forensics_pr8_8.js").read_text(encoding="utf-8")

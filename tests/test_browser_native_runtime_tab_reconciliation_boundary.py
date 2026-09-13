@@ -31,14 +31,19 @@ def _transitive_worker_imports(worker_name: str) -> list[str]:
 def test_manifest_routes_through_runtime_tab_reconciliation_wrapper() -> None:
     manifest = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     worker_name = manifest["background"]["service_worker"]
-    chain = _transitive_worker_imports(worker_name)
+    assert worker_name == "production/service_worker_entry.js"
+    assert manifest["background"].get("type") == "module"
 
-    assert worker_name.endswith(".js")
-    assert "service_worker_runtime_tab_reconciliation.js" in chain
-    assert "service_worker_observability.js" in chain
-    assert chain.index("service_worker_runtime_tab_reconciliation.js") < chain.index(
-        "service_worker_observability.js"
-    )
+    # Task 5 flattens the historical classic-script graph into one transitional
+    # production collaborator. Preserve the wrapper nesting as evidence without
+    # making the old import graph the manifest contract again.
+    bundle = (EXT / "production" / "legacy_runtime.js").read_text(encoding="utf-8")
+    wrapper = "/* BEGIN legacy source: service_worker_runtime_tab_reconciliation.js */"
+    lower = "/* BEGIN legacy source: service_worker_observability.js */"
+    lower_end = "/* END legacy source: service_worker_observability.js */"
+    wrapper_end = "/* END legacy source: service_worker_runtime_tab_reconciliation.js */"
+    assert wrapper in bundle and lower in bundle
+    assert bundle.index(wrapper) < bundle.index(lower) < bundle.index(lower_end) < bundle.index(wrapper_end)
 
 
 def test_reconciliation_wrapper_extends_observability_without_reimplementing_transport() -> None:

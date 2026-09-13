@@ -437,11 +437,11 @@ def test_packaged_extension_layers_pr9_2_above_preserved_entrypoint():
     )
     manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == "0.1.20"
-    assert manifest["background"]["service_worker"] == "service_worker_entry_v3.js"
+    assert manifest["background"]["service_worker"] == "production/service_worker_entry.js"
+    assert manifest["background"].get("type") == "module"
 
-    entrypoint = (extension / manifest["background"]["service_worker"]).read_text(
-        encoding="utf-8"
-    )
+    # PR9.2 historical layering remains evidence; production composition now has its own entry.
+    entrypoint = (extension / "service_worker_entry_v3.js").read_text(encoding="utf-8")
     assert 'importScripts("service_worker_rich_input_pr9_2.js")' in entrypoint
 
     overlay = (extension / "service_worker_rich_input_pr9_2.js").read_text(encoding="utf-8")
