@@ -623,8 +623,11 @@ function _cwaCharExternalEventType(entry) {
   if (method === "Network.loadingFinished" || method === "Network.webSocketClosed") {
     return "stream_finished";
   }
-  if (method === "Network.loadingFailed" || method === "Network.webSocketFrameError") {
-    return "stream_failed";
+  if (method === "Network.loadingFailed") {
+    return entry?.is_conversation_write === true ? "stream_failed" : "stream_data";
+  }
+  if (method === "Network.webSocketFrameError") {
+    return "stream_data";
   }
   return "stream_data";
 }
