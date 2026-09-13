@@ -57,6 +57,25 @@ function _pr88InstantEffortRelaxedSliderExpression(action) {
       const distance=Math.hypot(dx,dy);
       if(distance<=800) controls.push({el,mode,r,distance});
     }
+    if(controls.length===0) {
+      // WHILE THE PICKER IS OPEN, THE CONTROL STOPS CARRYING THE MODE (see the same fallback in
+      // service_worker_instant_effort_slider_contract_pr8_8.js, measured 2026-09-13: the effort pill reads
+      // the level while closed and the picker's SECTION TITLE while open, so a label-only identity reports
+      // the control as MISSING exactly when the slider it needs is on screen). The open pill is identified
+      // by the 3-step effort slider beside it, and the mode then comes from the slider's own value.
+      const openPills=Array.from(
+        document.querySelectorAll('button.__composer-pill,[role="button"].__composer-pill')
+      ).filter(visible).filter((el)=>(
+        el.getAttribute('aria-expanded')==='true'||normalize(el.getAttribute('data-state'))==='open'
+      ));
+      for(const el of openPills) {
+        const r=el.getBoundingClientRect();
+        const dx=Math.max(0,Math.max(cr.left-r.right,r.left-cr.right));
+        const dy=Math.max(0,Math.max(cr.top-r.bottom,r.top-cr.bottom));
+        const distance=Math.hypot(dx,dy);
+        if(distance<=800) controls.push({el,mode:null,r,distance,openLabelOnly:true});
+      }
+    }
     controls.sort((a,b)=>a.distance-b.distance);
     if(controls.length!==1) return {
       found:false,
@@ -95,7 +114,8 @@ function _pr88InstantEffortRelaxedSliderExpression(action) {
     }
     return {
       found:true,reason:null,candidateCount:1,currentControlCount:1,
-      currentMode:control.mode,currentControlOpen:true,
+      // control.mode is null for the open-pill fallback; the slider position carries the mode then.
+      currentMode:control.mode||['INSTANT','MEDIUM','HIGH'][slider.now]||null,currentControlOpen:true,
       currentControlOpenObserved:controlOpenObserved,
       openProofKind:controlOpenObserved?'trigger_open_state':'visible_exact_slider',
       min:slider.min,max:slider.max,now:slider.now,stepCount:3,

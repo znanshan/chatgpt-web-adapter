@@ -65,6 +65,9 @@ function _pr88InstantEffortSliderExpression(action) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : null;
     };
+    // The three positions of the effort slider, in the order the picker lays them out. Used only when the
+    // control's own label cannot carry the mode (see the open-pill fallback below).
+    const MODE_BY_INDEX = ['INSTANT','MEDIUM','HIGH'];
 
     const composer = [
       '#prompt-textarea',
@@ -85,6 +88,31 @@ function _pr88InstantEffortSliderExpression(action) {
       const dy = Math.max(0, Math.max(cr.top-r.bottom, r.top-cr.bottom));
       const distance = Math.hypot(dx,dy);
       if (distance <= 800) controls.push({el,mode,distance,r});
+    }
+    if (controls.length === 0) {
+      // WHILE THE PICKER IS OPEN, THE CONTROL STOPS CARRYING THE MODE. Measured 2026-09-13 on a fresh chat
+      // page: the effort pill reads 中 (MEDIUM) while closed and 思考强度 (the picker's SECTION TITLE)
+      // while open, so a label-only identity reports the control as MISSING at exactly the moment the
+      // slider it needs is on screen. The fresh-conversation write then died with
+      // PR8_10_MODEL_PROFILE_SLIDER_CONTRACT_NOT_PROVEN:current_effort_control_missing, twice, and with the
+      // conversation latched for plugin-capability loss the project could not be rolled forward at all.
+      //
+      // The open pill is accepted as the SAME control on the strength of the 3-step effort slider beside
+      // it, which is what makes this an identification rather than a guess: nothing else in the composer
+      // has a min=0/max=2 slider within 400px. The mode then comes from the slider's own value.
+      const openPills = Array.from(
+        document.querySelectorAll('button.__composer-pill,[role="button"].__composer-pill')
+      ).filter(visible).filter((el) => (
+        el.getAttribute('aria-expanded') === 'true' ||
+        normalize(el.getAttribute('data-state')) === 'open'
+      ));
+      for (const el of openPills) {
+        const r = el.getBoundingClientRect();
+        const dx = Math.max(0, Math.max(cr.left-r.right, r.left-cr.right));
+        const dy = Math.max(0, Math.max(cr.top-r.bottom, r.top-cr.bottom));
+        const distance = Math.hypot(dx,dy);
+        if (distance <= 800) controls.push({el,mode:null,distance,r,openLabelOnly:true});
+      }
     }
     controls.sort((a,b) => a.distance-b.distance);
     if (controls.length !== 1) {
@@ -145,7 +173,10 @@ function _pr88InstantEffortSliderExpression(action) {
 
     return {
       found:true, reason:null, candidateCount:1, currentControlCount:1,
-      currentMode:control.mode, currentControlOpen:true,
+      // control.mode is null for the open-pill fallback (the label is the section title then), so the
+      // mode is read from the slider position -- the same index space the caller targets with ArrowRight.
+      currentMode:control.mode || MODE_BY_INDEX[slider.now] || null,
+      currentControlOpen:true,
       currentControlRect:rect(control.el),
       min:slider.min, max:slider.max, now:slider.now, stepCount:3,
       orientation:slider.el.getAttribute('aria-orientation') || (slider.r.width >= slider.r.height ? 'horizontal' : 'vertical'),

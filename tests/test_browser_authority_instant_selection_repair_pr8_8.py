@@ -250,6 +250,35 @@ def test_both_mode_classifiers_accept_the_same_locale_labels():
         assert "极高" in text, f"{name} cannot see the label '极高'"
 
 
+def test_an_open_effort_picker_still_has_an_identifiable_control():
+    """While the picker is OPEN the control stops carrying the mode, so identity must not depend on it.
+
+    Measured 2026-09-13 on OH, and it blocked a plugin-capability rollover outright: the effort pill on a
+    fresh chat renders `中` (MEDIUM) while closed and `思考强度` -- the picker's SECTION TITLE -- while
+    open. Both slider contracts identified the control by a MODE label, so once the picker was open they
+    found zero controls and reported `current_effort_control_missing`, and the write died with
+    `PR8_10_MODEL_PROFILE_SLIDER_CONTRACT_NOT_PROVEN:current_effort_control_missing` twice in a row while
+    the 3-step slider it needed was on screen 10 px away.
+
+    The fallback is an IDENTIFICATION, not a guess: the open composer pill is accepted only because a
+    min=0/max=2 slider sits within 400 px of it, and the mode is then read from the slider's own value --
+    the same index space the caller targets.
+    """
+    root = browser_native_extension_dir()
+    for name in ("service_worker_instant_effort_slider_contract_pr8_8.js",
+                 "service_worker_instant_effort_activation_hardening_pr8_8.js"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "__composer-pill" in text, f"{name} has no open-pill identification"
+        assert "aria-expanded" in text and "data-state" in text, (
+            f"{name} must test the OPEN state, not assume the label survives")
+        assert "['INSTANT','MEDIUM','HIGH'][slider.now]" in text or "MODE_BY_INDEX[slider.now]" in text, (
+            f"{name} must read the mode from the slider when the label cannot carry it")
+        # The control must still be required to be NEAR the composer, and the slider near the control:
+        # without both distances this would identify any open pill on the page.
+        assert "distance<=800" in text or "distance <= 800" in text, f"{name} lost the composer distance"
+        assert "distance<=400" in text or "distance > 400" in text, f"{name} lost the slider distance"
+
+
 def test_provider_parses_lease_fenced_selection_record(monkeypatch):
     provider = InstantSelectionRepairProvider()
 
