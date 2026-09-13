@@ -1919,6 +1919,55 @@ function _pr88InstantModeSnapshotExpression() {
     }
     candidates.sort((a, b) => a.distance - b.distance);
     if (!candidates.length) {
+      // AN OPEN PICKER CARRIES THE MODE ON ITS SLIDER, NOT ON THE CONTROL'S LABEL. Measured 2026-09-13 on
+      // OH: the composer pill reads the level while CLOSED (中) and the picker's SECTION TITLE while OPEN
+      // (思考强度), so this expression -- which every model-profile step trusts for "what mode is selected"
+      // -- answered no_mode_control at exactly the moment a mode had just been selected. The write then
+      // died with PR8_10_MODEL_PROFILE_DID_NOT_SETTLE:HIGH after Home + ArrowRight x2 had in fact landed.
+      //
+      // The identification is the 3-step effort slider itself: min=0, max=2, and the picker lays the three
+      // levels out in order, so the thumb's value IS the mode. Nothing else in the composer has that
+      // slider, and it must sit within 400px of an OPEN composer pill within 800px of the composer.
+      const openPills = Array.from(
+        document.querySelectorAll('button.__composer-pill,[role="button"].__composer-pill')
+      ).filter(visible).filter((el) => (
+        el.getAttribute('aria-expanded') === 'true' ||
+        normalize(el.getAttribute('data-state')) === 'open'
+      )).filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const dx = Math.max(0, Math.max(composerRect.left - rect.right, rect.left - composerRect.right));
+        const dy = Math.max(0, Math.max(composerRect.top - rect.bottom, rect.top - composerRect.bottom));
+        return Math.sqrt(dx * dx + dy * dy) <= 800;
+      });
+      const sliders = [];
+      for (const el of Array.from(document.querySelectorAll('[role="slider"],input[type="range"]')).filter(visible)) {
+        const rect = el.getBoundingClientRect();
+        const min = Number(el.getAttribute('aria-valuemin') ?? el.min);
+        const max = Number(el.getAttribute('aria-valuemax') ?? el.max);
+        const now = Number(el.getAttribute('aria-valuenow') ?? el.value);
+        if (!(Number.isInteger(min) && Number.isInteger(max) && Number.isInteger(now))) continue;
+        if (!(min === 0 && max === 2 && now >= 0 && now <= 2)) continue;
+        const nearPill = openPills.some((pill) => {
+          const pr = pill.getBoundingClientRect();
+          const sx = (rect.left + rect.width / 2) - (pr.left + pr.width / 2);
+          const sy = (rect.top + rect.height / 2) - (pr.top + pr.height / 2);
+          return Math.sqrt(sx * sx + sy * sy) <= 400;
+        });
+        if (nearPill) sliders.push({ now, distance: Math.round(Math.hypot(
+          (rect.left + rect.width / 2) - (composerRect.left + composerRect.width / 2),
+          (rect.top + rect.height / 2) - (composerRect.top + composerRect.height / 2))) });
+      }
+      sliders.sort((a, b) => a.distance - b.distance);
+      if (sliders.length === 1) {
+        return {
+          composerReady: true,
+          selectedMode: ['INSTANT', 'MEDIUM', 'HIGH'][sliders[0].now],
+          selectedModeProven: true,
+          candidateCount: 1,
+          nearestDistancePx: sliders[0].distance,
+          proofKind: 'open_effort_slider_value'
+        };
+      }
       return { composerReady: true, selectedMode: null, selectedModeProven: false, candidateCount: 0, proofKind: 'no_mode_control' };
     }
     const nearest = candidates[0];
@@ -4077,10 +4126,15 @@ function _pr88PopupDomExpression() {
       const text = normalize(value);
       if (!text) return [];
       const out = [];
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) out.push('INSTANT');
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text.includes('thinking standard')) out.push('MEDIUM');
-      if (text.includes('extra high') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
-      else if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text.includes('thinking extended')) out.push('HIGH');
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER. This deployment renders the composer's
+      // effort control as the Chinese single character "高"; an English+Russian-only table classifies the
+      // real control to nothing, and every caller that trusts this list then reports the control as
+      // MISSING, which blocks the submit. Chinese labels use includes()/equality, never \\b: there is no
+      // word boundary between CJK characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) out.push('INSTANT');
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) out.push('MEDIUM');
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
+      else if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) out.push('HIGH');
       if (text.includes('pro standard')) out.push('PRO_STANDARD');
       if (text.includes('pro extended')) out.push('PRO_EXTENDED');
       if (text === 'thinking') out.push('REASONING_OTHER');
@@ -5155,9 +5209,15 @@ function _pr88EffortTopologyExpression(kind) {
     const effort = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER. This deployment renders the composer's
+      // effort control as the Chinese single character "高"; an English+Russian-only table classifies the
+      // real control to null, and the caller then reports the control as MISSING, which blocks the submit.
+      // Chinese labels are matched with includes()/equality, never \\b: there is no word boundary between
+      // CJK characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const model = (value) => {
@@ -5539,9 +5599,15 @@ function _pr88EffortGeometryExpression() {
     const effort = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER. This deployment renders the composer's
+      // effort control as the Chinese single character "高"; an English+Russian-only table classifies the
+      // real control to null, and the caller then reports the control as MISSING, which blocks the submit.
+      // Chinese labels are matched with includes()/equality, never \\b: there is no word boundary between
+      // CJK characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const dimension = (value) => {
@@ -5817,9 +5883,15 @@ function _pr88InstantEffortSliderExpression(action) {
     const effort = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER. This deployment renders the composer's
+      // effort control as the Chinese single character "高"; an English+Russian-only table classifies the
+      // real control to null, and the caller then reports the control as MISSING, which blocks the submit.
+      // Chinese labels are matched with includes()/equality, never \\b: there is no word boundary between
+      // CJK characters and the surrounding text, so a \\b pattern would look fixed and match nothing.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const visible = (el) => {
@@ -5851,6 +5923,9 @@ function _pr88InstantEffortSliderExpression(action) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : null;
     };
+    // The three positions of the effort slider, in the order the picker lays them out. Used only when the
+    // control's own label cannot carry the mode (see the open-pill fallback below).
+    const MODE_BY_INDEX = ['INSTANT','MEDIUM','HIGH'];
 
     const composer = [
       '#prompt-textarea',
@@ -5871,6 +5946,31 @@ function _pr88InstantEffortSliderExpression(action) {
       const dy = Math.max(0, Math.max(cr.top-r.bottom, r.top-cr.bottom));
       const distance = Math.hypot(dx,dy);
       if (distance <= 800) controls.push({el,mode,distance,r});
+    }
+    if (controls.length === 0) {
+      // WHILE THE PICKER IS OPEN, THE CONTROL STOPS CARRYING THE MODE. Measured 2026-09-13 on a fresh chat
+      // page: the effort pill reads 中 (MEDIUM) while closed and 思考强度 (the picker's SECTION TITLE)
+      // while open, so a label-only identity reports the control as MISSING at exactly the moment the
+      // slider it needs is on screen. The fresh-conversation write then died with
+      // PR8_10_MODEL_PROFILE_SLIDER_CONTRACT_NOT_PROVEN:current_effort_control_missing, twice, and with the
+      // conversation latched for plugin-capability loss the project could not be rolled forward at all.
+      //
+      // The open pill is accepted as the SAME control on the strength of the 3-step effort slider beside
+      // it, which is what makes this an identification rather than a guess: nothing else in the composer
+      // has a min=0/max=2 slider within 400px. The mode then comes from the slider's own value.
+      const openPills = Array.from(
+        document.querySelectorAll('button.__composer-pill,[role="button"].__composer-pill')
+      ).filter(visible).filter((el) => (
+        el.getAttribute('aria-expanded') === 'true' ||
+        normalize(el.getAttribute('data-state')) === 'open'
+      ));
+      for (const el of openPills) {
+        const r = el.getBoundingClientRect();
+        const dx = Math.max(0, Math.max(cr.left-r.right, r.left-cr.right));
+        const dy = Math.max(0, Math.max(cr.top-r.bottom, r.top-cr.bottom));
+        const distance = Math.hypot(dx,dy);
+        if (distance <= 800) controls.push({el,mode:null,distance,r,openLabelOnly:true});
+      }
     }
     controls.sort((a,b) => a.distance-b.distance);
     if (controls.length !== 1) {
@@ -5931,7 +6031,10 @@ function _pr88InstantEffortSliderExpression(action) {
 
     return {
       found:true, reason:null, candidateCount:1, currentControlCount:1,
-      currentMode:control.mode, currentControlOpen:true,
+      // control.mode is null for the open-pill fallback (the label is the section title then), so the
+      // mode is read from the slider position -- the same index space the caller targets with ArrowRight.
+      currentMode:control.mode || MODE_BY_INDEX[slider.now] || null,
+      currentControlOpen:true,
       currentControlRect:rect(control.el),
       min:slider.min, max:slider.max, now:slider.now, stepCount:3,
       orientation:slider.el.getAttribute('aria-orientation') || (slider.r.width >= slider.r.height ? 'horizontal' : 'vertical'),
@@ -6165,9 +6268,17 @@ function _pr88InstantEffortRelaxedSliderExpression(action) {
     const effort = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER, AND THIS FILE HAS TWO OF THEM. Fixing only
+      // the trigger expression above left THIS one English+Russian-only, and the relaxed slider contract
+      // is what a fresh chat page falls back to: measured 2026-09-13 12:48 on OH, a rollover then died
+      // with PR8_10_MODEL_PROFILE_SLIDER_CONTRACT_NOT_PROVEN:current_effort_control_missing while the
+      // effort pill sat 10 px from the composer with the Chinese single character as its only label.
+      // Chinese labels use includes()/equality, never \\b: there is no word boundary between CJK
+      // characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const visible = (el) => {
@@ -6203,6 +6314,25 @@ function _pr88InstantEffortRelaxedSliderExpression(action) {
       const dy=Math.max(0,Math.max(cr.top-r.bottom,r.top-cr.bottom));
       const distance=Math.hypot(dx,dy);
       if(distance<=800) controls.push({el,mode,r,distance});
+    }
+    if(controls.length===0) {
+      // WHILE THE PICKER IS OPEN, THE CONTROL STOPS CARRYING THE MODE (see the same fallback in
+      // service_worker_instant_effort_slider_contract_pr8_8.js, measured 2026-09-13: the effort pill reads
+      // the level while closed and the picker's SECTION TITLE while open, so a label-only identity reports
+      // the control as MISSING exactly when the slider it needs is on screen). The open pill is identified
+      // by the 3-step effort slider beside it, and the mode then comes from the slider's own value.
+      const openPills=Array.from(
+        document.querySelectorAll('button.__composer-pill,[role="button"].__composer-pill')
+      ).filter(visible).filter((el)=>(
+        el.getAttribute('aria-expanded')==='true'||normalize(el.getAttribute('data-state'))==='open'
+      ));
+      for(const el of openPills) {
+        const r=el.getBoundingClientRect();
+        const dx=Math.max(0,Math.max(cr.left-r.right,r.left-cr.right));
+        const dy=Math.max(0,Math.max(cr.top-r.bottom,r.top-cr.bottom));
+        const distance=Math.hypot(dx,dy);
+        if(distance<=800) controls.push({el,mode:null,r,distance,openLabelOnly:true});
+      }
     }
     controls.sort((a,b)=>a.distance-b.distance);
     if(controls.length!==1) return {
@@ -6242,7 +6372,8 @@ function _pr88InstantEffortRelaxedSliderExpression(action) {
     }
     return {
       found:true,reason:null,candidateCount:1,currentControlCount:1,
-      currentMode:control.mode,currentControlOpen:true,
+      // control.mode is null for the open-pill fallback; the slider position carries the mode then.
+      currentMode:control.mode||['INSTANT','MEDIUM','HIGH'][slider.now]||null,currentControlOpen:true,
       currentControlOpenObserved:controlOpenObserved,
       openProofKind:controlOpenObserved?'trigger_open_state':'visible_exact_slider',
       min:slider.min,max:slider.max,now:slider.now,stepCount:3,
@@ -6277,9 +6408,28 @@ function _pr88InstantEffortTriggerExpression(action) {
     const effort=(value)=>{
       const text=normalize(value);
       if(!text) return null;
-      if(/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if(/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if(/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // THE FIFTH MODE-LABEL TABLE, AND THE ONE 62f35b5 MISSED. That commit made four classifiers
+      // locale-agnostic after the live control rendered as the Chinese single character "高" and the
+      // English+Russian table classified it to null; this expression kept the old table, so the SAME
+      // page produced trigger_missing from here while every other path saw the control.
+      //
+      // NOTE FOR THE NEXT EDITOR: this source lives inside a backtick template literal, so a backtick
+      // anywhere in these comments (or in the JS below) terminates it and the FILE stops parsing. The
+      // adapter's own JavaScript-parse test catches that; nothing else does.
+      //
+      // Measured 2026-09-13 on OH: the effort pill is a button whose only label is the Chinese single
+      // character, this table returned candidateCount 0, and the fresh-conversation write died with
+      // PR8_8_INSTANT_EFFORT_TRIGGER_FOCUS_NOT_PROVEN twice in a row -- so a project that had lost its
+      // plugin capability could not be rolled onto a fresh conversation at all. The message names FOCUS
+      // because the caller reports the whole conjunction with one name, which is why the DOM had to be
+      // measured instead of the error read.
+      //
+      // Chinese labels use includes()/equality, never \b: there is no word boundary between CJK and
+      // the surrounding text, so a \b pattern would look fixed and match nothing.
+      if(/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if(text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if(/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if(/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const visible=(el)=>{
