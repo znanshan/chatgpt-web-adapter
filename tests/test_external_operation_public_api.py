@@ -65,6 +65,43 @@ class FakeExternalOperationProvider(BrowserNativeTurnProvider):
                 "next_cursor": f"{operation_id}:11",
                 "has_more": False,
             }
+        if payload["type"] == "external_operation_ack":
+            return {
+                "protocol": 1,
+                "type": "external_operation_ack_result",
+                "request_id": payload["request_id"],
+                "ok": True,
+                "operation_id": payload["operation_id"],
+                "cursor": payload["cursor"],
+            }
+        if payload["type"] == "external_operation_status":
+            return {
+                "protocol": 1,
+                "type": "external_operation_status_result",
+                "request_id": payload["request_id"],
+                "ok": True,
+                "operation_id": payload["operation_id"],
+                "status": "running",
+                "event_count": 2,
+                "terminal_markers": 0,
+                "failed": False,
+                "retryable": False,
+                "cursor": "operation-1:11",
+            }
+        if payload["type"] == "external_operation_result":
+            return {
+                "protocol": 1,
+                "type": "external_operation_result_result",
+                "request_id": payload["request_id"],
+                "ok": True,
+                "operation_id": payload["operation_id"],
+                "status": "completed",
+                "event_count": 3,
+                "terminal_markers": 1,
+                "failed": False,
+                "retryable": False,
+                "cursor": "operation-1:12",
+            }
         raise AssertionError(payload)
 
 
@@ -94,6 +131,35 @@ class ExternalOperationPublicApiTests(unittest.TestCase):
         self.assertEqual(stopped["session_id"], "operation-1")
         self.assertEqual(provider.calls[-1]["action"], "stop")
 
+    def test_start_observation_forwards_known_operation_provenance(self) -> None:
+        provider = FakeExternalOperationProvider()
+        provider.start_external_operation_observation(
+            "operation-1",
+            conversation_ref="conversation-1",
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+        )
+        call = provider.calls[-1]
+        self.assertEqual(call["type"], "characterize")
+        self.assertEqual(call["action"], "start")
+        self.assertEqual(call["conversation_ref"], "conversation-1")
+        self.assertEqual(call["attempt_id"], "attempt-1")
+        self.assertEqual(call["turn_id"], "turn-1")
+
+    def test_provider_exposes_ack_status_and_result(self) -> None:
+        provider = FakeExternalOperationProvider()
+        ack = provider.ack_external_operation_events("operation-1", cursor="operation-1:11")
+        self.assertEqual(ack["cursor"], "operation-1:11")
+        self.assertEqual(provider.calls[-1]["type"], "external_operation_ack")
+
+        status = provider.external_operation_status("operation-1")
+        self.assertEqual(status["status"], "running")
+        self.assertEqual(provider.calls[-1]["type"], "external_operation_status")
+
+        result = provider.external_operation_result("operation-1")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(provider.calls[-1]["type"], "external_operation_result")
+
     def test_provider_fails_closed_when_extension_returns_another_operation(self) -> None:
         provider = FakeExternalOperationProvider()
         provider.response_operation_id = "operation-other"
@@ -104,6 +170,9 @@ class ExternalOperationPublicApiTests(unittest.TestCase):
         for name in (
             "start_external_operation_observation",
             "read_external_operation_events",
+            "ack_external_operation_events",
+            "external_operation_status",
+            "external_operation_result",
             "stop_external_operation_observation",
         ):
             self.assertTrue(callable(getattr(ChatGPTWebClient, name, None)), name)

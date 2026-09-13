@@ -154,6 +154,38 @@ def test_stream_stays_running_while_data_arrives_after_conjunction() -> None:
     assert result["terminal_markers"] >= 1
 
 
+def test_conversation_write_transport_finish_requires_quiescence() -> None:
+    now = {"ms": 1000.0}
+
+    def clock() -> float:
+        return now["ms"] / 1000.0
+
+    stream = ExternalOperationStream("op-transport", quiescence_window_seconds=3.0, now=clock)
+
+    def emit(seq: int, event_type: str, *, is_write: bool, t_ms: int) -> None:
+        stream.ingest(ExternalOperationEvent(
+            operation_id="op-transport",
+            event_seq=seq,
+            source="network",
+            event_type=event_type,
+            t_ms=t_ms,
+            cursor=f"op-transport:{seq}",
+            metadata={"is_conversation_write": is_write},
+        ))
+
+    emit(0, "turn_submitted", is_write=True, t_ms=1000)
+    emit(1, "stream_data", is_write=True, t_ms=1200)
+    emit(2, "stream_finished", is_write=False, t_ms=1300)
+    now["ms"] = 6000.0
+    assert stream.status() == "running"
+
+    emit(3, "stream_finished", is_write=True, t_ms=6000)
+    assert stream.status() == "running"
+    now["ms"] = 9501.0
+    assert stream.status() == "completed"
+    assert stream.result()["terminal_markers"] >= 1
+
+
 def test_stream_fails_closed_on_failure_events() -> None:
     stream = ExternalOperationStream("op-1")
     stream.ingest(ExternalOperationEvent(
