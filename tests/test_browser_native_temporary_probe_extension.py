@@ -11,9 +11,11 @@ def test_temporary_probe_is_layered_above_reconciled_worker() -> None:
     worker_name = manifest["background"]["service_worker"]
 
     assert manifest["version"] == "0.1.20"
-    assert worker_name == "service_worker_entry_v3.js"
+    assert worker_name == "production/service_worker_entry.js"
+    assert manifest["background"].get("type") == "module"
 
-    route_worker = (root / worker_name).read_text(encoding="utf-8")
+    # Historical probe layering remains testable evidence, but is no longer the manifest entry.
+    route_worker = (root / "service_worker_entry_v3.js").read_text(encoding="utf-8")
     assert 'importScripts("service_worker_temporary_chat_manual_ground_truth.js")' in route_worker
     manual_worker = (
         root / "service_worker_temporary_chat_manual_ground_truth.js"
