@@ -652,6 +652,7 @@ function _cwaCharExternalMetadata(entry) {
   assign("opcode", Number.isInteger(entry?.opcode) ? entry.opcode : null);
   assign("close_code", Number.isInteger(entry?.close_code) ? entry.close_code : null);
   assign("tab_id", Number.isInteger(entry?.tabId) ? entry.tabId : null);
+  assign("observed_conversation_ref", typeof entry?.conversation_id === "string" ? entry.conversation_id : null);
   assign("page_event_kind", typeof entry?.kind === "string" ? entry.kind : null);
   assign("visible", typeof entry?.visible === "boolean" ? entry.visible : null);
   if (entry?.dom && typeof entry.dom === "object") {
@@ -728,7 +729,9 @@ function _cwaCharProjectExternalEvent(operationId, entry) {
     protocol: 2,
     type: "turn_event",
     operation_id: operationId,
-    conversation_ref: typeof entry?.conversation_id === "string" ? entry.conversation_id : _cwaCharConversationRef,
+    conversation_ref: typeof _cwaCharConversationRef === "string"
+      ? _cwaCharConversationRef
+      : (typeof entry?.conversation_id === "string" ? entry.conversation_id : null),
     attempt_id: _cwaCharAttemptId,
     turn_id: _cwaCharTurnId,
     event_seq: entry.source_seq,

@@ -79,3 +79,62 @@ def test_operation_provenance_survives_public_projection_and_worker_restart() ->
     assert stored["conversation_ref"] == "conversation-1"
     assert stored["attempt_id"] == "attempt-1"
     assert stored["turn_id"] == "turn-1"
+
+
+def _projection_probe(caller_conversation: str | None, observed_conversation: str) -> dict[str, object]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension provenance fixture")
+    harness = r'''
+const fs = require("fs");
+const vm = require("vm");
+const source = fs.readFileSync(process.argv[1], "utf8");
+const noopEvent = { addListener() {}, removeListener() {} };
+const chrome = {
+  storage: { local: { async get() { return {}; }, async set() {}, async remove() {} } },
+  debugger: { onEvent: noopEvent, async sendCommand() { return {}; }, async getTargets() { return []; } },
+  tabs: { onUpdated: noopEvent, onActivated: noopEvent, onRemoved: noopEvent },
+};
+const sandbox = {
+  URL, Map, Set, console, chrome,
+  CHATGPT_ORIGIN: "https://chatgpt.com",
+  BRIDGE_PROTOCOL_VERSION: 1,
+  onNativeMessage: async function() {}, safePortPost() {},
+  setTimeout() { return 1; }, clearTimeout() {}, setInterval() { return 1; }, clearInterval() {},
+};
+const context = vm.createContext(sandbox);
+vm.runInContext(source, context);
+const caller = JSON.parse(process.argv[2]);
+const observed = process.argv[3];
+vm.runInContext(`_cwaCharSessionId = "operation-1"`, context);
+vm.runInContext(`_cwaCharConversationRef = ${JSON.stringify(caller)}`, context);
+vm.runInContext(`_cwaCharAttemptId = "attempt-1"`, context);
+vm.runInContext(`_cwaCharTurnId = "turn-1"`, context);
+const event = vm.runInContext(`_cwaCharProjectExternalEvent("operation-1", ${JSON.stringify({
+  source:"tab", kind:"tab_updated", seq:1, source_seq:1, t:1000,
+  conversation_id:observed, tabId:7, visible:true
+})})`, context);
+process.stdout.write(JSON.stringify(event));
+'''
+    completed = subprocess.run(
+        [node, "-e", harness, str(SOURCE_JS), json.dumps(caller_conversation), observed_conversation],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_known_conversation_provenance_does_not_drift_to_another_tab_route() -> None:
+    event = _projection_probe("conversation-1", "conversation-other")
+    assert event["conversation_ref"] == "conversation-1"
+    assert event["attempt_id"] == "attempt-1"
+    assert event["turn_id"] == "turn-1"
+    assert event["event_type"] == "route_change"
+    assert event["metadata"]["observed_conversation_ref"] == "conversation-other"
+
+
+def test_fresh_conversation_can_bind_from_observed_route() -> None:
+    event = _projection_probe(None, "conversation-new")
+    assert event["conversation_ref"] == "conversation-new"
+    assert event["metadata"]["observed_conversation_ref"] == "conversation-new"
