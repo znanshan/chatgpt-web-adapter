@@ -1,3 +1,12 @@
+// Generated transitional runtime for Task 5.
+// Native-message dispatch is installed once by production/service_worker_entry.js.
+let _productionNativeMessageRouter = null;
+
+function _dispatchProductionNativeMessage(message, port) {
+  const router = _productionNativeMessageRouter ?? onNativeMessage;
+  return router(message, port);
+}
+
 
 /* BEGIN legacy source: service_worker_temporary_chat_manual_ground_truth.js */
 
@@ -752,7 +761,7 @@ function connectNativeBridge() {
   nativePort = port;
   const thisPort = port;
   port.onMessage.addListener((message) => {
-    onNativeMessage(message, thisPort);
+    _dispatchProductionNativeMessage(message, thisPort);
   });
   port.onDisconnect.addListener(() => {
     if (nativePort === thisPort) nativePort = null;
@@ -774,10 +783,8 @@ function connectNativeBridge() {
 
 chrome.runtime.onInstalled.addListener(() => connectNativeBridge());
 chrome.runtime.onStartup.addListener(() => connectNativeBridge());
-connectNativeBridge();
 
 /* END legacy source: service_worker.js */
-
 
 const HOTFIX_SUBMIT_ACK_MS = 1_500;
 const HOTFIX_FINAL_ACK_MS = 2_500;
@@ -973,7 +980,6 @@ async function _patchedCoreSendCommand(debuggee, method, params = undefined) {
 sendCommand = _patchedCoreSendCommand;
 
 /* END legacy source: service_worker_hotfix.js */
-
 
 const STALE_UI_COMPLETION_EVIDENCE_MAX_AGE_MS = 5_000;
 const STALE_UI_RELOAD_TIMEOUT_MS = 45_000;
@@ -1318,7 +1324,6 @@ executeNativeTurn = async function _executeNativeTurnWithStaleUiRecovery(message
 };
 
 /* END legacy source: service_worker_recovery.js */
-
 
 // PR8.8 phase-level Browser Authority cost attribution.
 //
@@ -10233,7 +10238,6 @@ executeNativeTurn = async function _pr8132ExecuteNativeTurnWithStartupDiagnostic
 
 /* END legacy source: service_worker_temporary_startup_readiness_pr8_13_2.js */
 
-
 const _pr824aOriginalExecuteNativeTurn = executeNativeTurn;
 
 async function _pr824aExistingRuntimeTabSnapshot() {
@@ -10295,7 +10299,6 @@ executeNativeTurn = async function _executeNativeTurnWithProvisioningObservabili
   }
 };
 /* END legacy source: service_worker_observability.js */
-
 
 const _pr824a3RawStoredRuntimeTabId = storedRuntimeTabId;
 let _pr824a3ValidationInFlight = null;
@@ -10404,7 +10407,6 @@ const PR88_BROWSER_AUTHORITY_LEASE_KEY = "browserNativeRuntimeTabAuthorityLeaseI
 const PR88_RESOURCE_SAMPLE_MIN_MS = 1000;
 const PR88_RESOURCE_SAMPLE_MAX_MS = 15000;
 const _pr88PriorExecuteNativeTurn = executeNativeTurn;
-const _pr88PriorOnNativeMessage = onNativeMessage;
 
 function _pr88LeaseId(value) {
   const leaseId = typeof value === "string" ? value.trim() : "";
@@ -10701,50 +10703,7 @@ async function _pr88ReleaseRuntimeTab(message) {
   };
 }
 
-onNativeMessage = async function _onNativeMessageWithBrowserAuthorityLease(message, port) {
-  if (message?.protocol !== BRIDGE_PROTOCOL_VERSION) return;
-  if (message?.type !== "release_runtime_tab") {
-    return _pr88PriorOnNativeMessage(message, port);
-  }
-
-  const requestId = message.request_id;
-  if (typeof requestId !== "string" || !requestId) return;
-  if (activeRequestId !== null) {
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: "release_runtime_tab_result",
-      request_id: requestId,
-      ok: false,
-      error: "BROWSER_NATIVE_EXTENSION_BUSY"
-    });
-    return;
-  }
-
-  activeRequestId = requestId;
-  try {
-    const result = await _pr88ReleaseRuntimeTab(message);
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: "release_runtime_tab_result",
-      request_id: requestId,
-      ok: true,
-      ...result
-    });
-  } catch (error) {
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: "release_runtime_tab_result",
-      request_id: requestId,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  } finally {
-    activeRequestId = null;
-  }
-};
-
 /* END legacy source: service_worker_runtime_tab_reconciliation.js */
-
 
 const PR87_TEMPORARY_PROBE_DEFAULT_TIMEOUT_MS = 30_000;
 const PR87_TEMPORARY_PROBE_MAX_TIMEOUT_MS = 120_000;
@@ -11036,7 +10995,6 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryModeProbe(mess
 
 /* END legacy source: service_worker_temporary_chat.js */
 
-
 // PR8.7 live probe repair: current ChatGPT exposed the Temporary control only
 // through aria-label, without aria-pressed/data-state selected attributes.
 // Treat accessibility action semantics as explicit state evidence when the
@@ -11181,7 +11139,6 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryStateSignalRes
 };
 
 /* END legacy source: service_worker_temporary_chat_state_semantics.js */
-
 
 // PR8.7 live characterization #2:
 // DOM-selected attributes and aria-label action semantics did not expose the
@@ -11387,7 +11344,6 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryAXEvidence(mes
 };
 
 /* END legacy source: service_worker_temporary_chat_ax_semantics.js */
-
 
 // PR8.7 live characterization #3:
 // Current ChatGPT does not expose Temporary mode through DOM selected attrs or
@@ -11606,7 +11562,6 @@ _pr87TemporaryControlSnapshot = async function _pr87TemporaryControlSnapshotWith
 };
 
 /* END legacy source: service_worker_temporary_chat_semantic_notice.js */
-
 
 // PR8.7 live characterization #4:
 // Pre-write DOM, aria-label, Accessibility Tree, and page-level semantic
@@ -11910,7 +11865,6 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryTurnCharacteri
 
 /* END legacy source: service_worker_temporary_chat_turn_probe.js */
 
-
 // PR8.7 live characterization #5:
 // A Temporary-candidate conversation can be briefly represented by an exact
 // /c/<conversation_id> anchor while a fresh ChatGPT root page hydrates. A single
@@ -12198,7 +12152,6 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryHistoryCharact
 };
 
 /* END legacy source: service_worker_temporary_chat_history_probe.js */
-
 
 // PR8.7 manual ground-truth characterization:
 // Automated activation produced an ordinary durable chat and therefore cannot
@@ -12610,7 +12563,6 @@ executeNativeTurn = async function _executeNativeTurnWithManualTemporaryGroundTr
 };
 
 /* END legacy source: service_worker_temporary_chat_manual_ground_truth.js */
-
 
 // PR8.7 T7b characterization:
 // Open the exact /c/<ephemeral-backend-id> product route only after the original
@@ -13544,7 +13496,6 @@ executeNativeTurn = async function _executeNativeTurnWithPr92RichInput(message) 
 
 /* END legacy source: service_worker_rich_input_pr9_2.js */
 
-
 // PR9.2 deadline/fence repair layer.
 
 /* BEGIN legacy source: service_worker_rich_input_deadline_repair_pr9_2.js */
@@ -13910,7 +13861,6 @@ executeNativeTurn = async function _executeNativeTurnWithPr92DeadlineRepair(mess
 };
 
 /* END legacy source: service_worker_rich_input_deadline_repair_pr9_2.js */
-
 
 // PR9.2 final closure repair: page-owned attachment evidence and page-side
 // deadline-guarded rich submission. Loaded last so raw CDP Input cannot regain
@@ -14285,7 +14235,6 @@ executeNativeTurn = async function _executeNativeTurnWithPr92ClosureRepair(messa
 };
 
 /* END legacy source: service_worker_rich_input_closure_repair_pr9_2.js */
-
 
 // PR9.2 schema-7 final authority repair: atomic attachment validation+submit,
 // non-awaited post-click debugger acknowledgement, and session-bound fenced-tab
@@ -20668,7 +20617,6 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema29Repair(mess
 
 /* END legacy source: service_worker_rich_input_schema29_repair_pr9_2.js */
 
-
 // PR9.3 observational-only source/citation normalization. Loaded after the final
 // PR9.2 authority generation so it can observe PR8.12 message events without
 // participating in attachment staging, protected submit, retry, or finality.
@@ -20969,7 +20917,6 @@ _pr812InspectMessage = function _pr812InspectMessageWithStructuredSources(contex
 
 /* END legacy source: service_worker_product_source_citations_pr9_3.js */
 
-
 /* END legacy source: service_worker_rich_input_schema7_repair_pr9_2.js */
 
 
@@ -21229,7 +21176,6 @@ executeNativeTurn = async function _executeNativeTurnWithSubmitOnly(message) {
 };
 
 /* END legacy source: service_worker_submit_only_v2.js */
-
 
 // Protocol-v2 external-operation observation over the existing page-owned recorder.
 // Inert by default; activated only by an explicit observer start. Loaded before
@@ -22162,79 +22108,6 @@ function _cwaCharStatus() {
   };
 }
 
-const _cwaCharPriorOnNativeMessage = onNativeMessage;
-onNativeMessage = async function _onNativeMessageWithCharacterizationRecorder(message, port) {
-  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_ack") {
-    const reply = await _cwaCharExternalOperationAck(message.operation_id, message.cursor);
-    safePortPost(port, { protocol: BRIDGE_PROTOCOL_VERSION, type: "external_operation_ack_result", request_id: message.request_id, ...reply });
-    return;
-  }
-  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_status") {
-    const reply = await _cwaCharExternalOperationStatus(message.operation_id);
-    safePortPost(port, { protocol: BRIDGE_PROTOCOL_VERSION, type: "external_operation_status_result", request_id: message.request_id, ...reply });
-    return;
-  }
-  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_result") {
-    const reply = await _cwaCharExternalOperationResult(message.operation_id);
-    safePortPost(port, { protocol: BRIDGE_PROTOCOL_VERSION, type: "external_operation_result_result", request_id: message.request_id, ...reply });
-    return;
-  }
-  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_events") {
-    const reply = await _cwaCharExternalOperationEvents(
-      message.operation_id,
-      message.cursor ?? null,
-      message.limit
-    );
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: "external_operation_events_result",
-      request_id: message.request_id,
-      ...reply
-    });
-    return;
-  }
-  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "characterize") {
-    const action = message.action;
-    const requestId = message.request_id;
-    let reply;
-    if (action === "start") {
-      reply = await _cwaCharStart(
-        typeof message.session_id === "string" && message.session_id ? message.session_id : null,
-        {
-          conversation_ref: message.conversation_ref ?? null,
-          attempt_id: message.attempt_id ?? null,
-          turn_id: message.turn_id ?? null,
-        }
-      );
-    } else if (action === "stop") {
-      const requestedSession = typeof message.session_id === "string" && message.session_id
-        ? message.session_id
-        : null;
-      if (requestedSession !== null && requestedSession !== _cwaCharSessionId) {
-        reply = { ok: false, error: "CHARACTERIZE_SESSION_MISMATCH" };
-      } else {
-        reply = await _cwaCharStop();
-      }
-    } else if (action === "dump") {
-      reply = await _cwaCharDump();
-    } else if (action === "clear") {
-      reply = await _cwaCharClear();
-    } else if (action === "status") {
-      reply = _cwaCharStatus();
-    } else {
-      reply = { ok: false, error: "CHARACTERIZE_UNKNOWN_ACTION" };
-    }
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: "characterize_result",
-      request_id: requestId,
-      ...reply
-    });
-    return;
-  }
-  return _cwaCharPriorOnNativeMessage(message, port);
-};
-
 /* END legacy source: service_worker_external_operation_v2_1.js */
 
 
@@ -22414,27 +22287,6 @@ async function _cwaRunMonSnapshot() {
     pages: pageSnapshots
   };
 }
-
-const _cwaRunMonPriorOnNativeMessage = onNativeMessage;
-onNativeMessage = async function _onNativeMessageWithRunningMonitor(message, port) {
-  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "running_snapshot") {
-    const requestId = message.request_id;
-    let reply;
-    try {
-      reply = await _cwaRunMonSnapshot();
-    } catch (error) {
-      reply = { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: "running_snapshot_result",
-      request_id: requestId,
-      ...reply
-    });
-    return;
-  }
-  return _cwaRunMonPriorOnNativeMessage(message, port);
-};
 
 /* END legacy source: service_worker_running_monitor.js */
 
@@ -22802,34 +22654,6 @@ executeNativeTurn = async function _executeNativeTurnWithPersistentObservation(m
   return result;
 };
 
-const _cwaPersistentPriorOnNativeMessage = onNativeMessage;
-onNativeMessage = async function _onNativeMessageWithPersistentObservation(message, port) {
-  if (message?.protocol !== BRIDGE_PROTOCOL_VERSION ||
-      (message?.type !== "observe_turn" && message?.type !== "observe_list_surface")) {
-    return _cwaPersistentPriorOnNativeMessage(message, port);
-  }
-  const requestId = message.request_id;
-  if (typeof requestId !== "string" || !requestId) return;
-  try {
-    const observation = message?.type === "observe_turn"
-      ? await _cwaObserveTurn(message)
-      : await _cwaEnsureListSurface(message);
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: message?.type === "observe_turn" ? "turn_observation_result" : "list_surface_result",
-      request_id: requestId, ok: true,
-      ...(message?.type === "observe_turn" ? { observation } : observation)
-    });
-  } catch (error) {
-    safePortPost(port, {
-      protocol: BRIDGE_PROTOCOL_VERSION,
-      type: message?.type === "observe_turn" ? "turn_observation_result" : "list_surface_result",
-      request_id: requestId, ok: false,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-};
-
 // Resident list surface: a dedicated ChatGPT root page whose own DOM carries
 // the account-level recent-conversation list (no single-view bounce, no
 // self-exclusion). The persistent observer holds its debugger so the
@@ -22859,13 +22683,52 @@ async function _cwaEnsureListSurface(message) {
 /* END legacy source: service_worker_persistent_turn_observer_v3.js */
 
 
+// Transitional Task-5 boundary: expose final assembled turn behavior and the
+// named native-message capabilities used by the explicit production router.
+function _tryBeginNativeRequest(requestId) {
+  if (activeRequestId !== null) return false;
+  activeRequestId = requestId;
+  return true;
+}
 
-// Transitional Task-5 boundary: expose the final assembled callbacks without
-// letting the production entry mutate the historical global wrapper chain.
+function _endNativeRequest(requestId) {
+  if (activeRequestId === requestId) activeRequestId = null;
+}
+
+export function installNativeMessageRouter(router) {
+  if (typeof router !== "function") throw new TypeError("NATIVE_MESSAGE_ROUTER_REQUIRED");
+  if (_productionNativeMessageRouter !== null) {
+    throw new Error("NATIVE_MESSAGE_ROUTER_ALREADY_INSTALLED");
+  }
+  _productionNativeMessageRouter = router;
+}
+
 export function getLegacyRuntimeCallbacks() {
+  const nativeMessageCapabilities = Object.freeze({
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    postNativeResult: safePortPost,
+    fallbackNativeMessage: onNativeMessage,
+    tryBeginNativeRequest: _tryBeginNativeRequest,
+    endNativeRequest: _endNativeRequest,
+    releaseRuntimeTab: _pr88ReleaseRuntimeTab,
+    externalOperationAck: _cwaCharExternalOperationAck,
+    externalOperationStatus: _cwaCharExternalOperationStatus,
+    externalOperationResult: _cwaCharExternalOperationResult,
+    externalOperationEvents: _cwaCharExternalOperationEvents,
+    characterizationStart: _cwaCharStart,
+    characterizationStop: _cwaCharStop,
+    characterizationDump: _cwaCharDump,
+    characterizationClear: _cwaCharClear,
+    characterizationStatus: _cwaCharStatus,
+    characterizationSessionId: () => _cwaCharSessionId,
+    runningSnapshot: _cwaRunMonSnapshot,
+    observeTurn: _cwaObserveTurn,
+    ensureListSurface: _cwaEnsureListSurface,
+  });
   return Object.freeze({
     executeTurn: executeNativeTurn,
-    routeNativeMessage: onNativeMessage,
+    startNativeBridge: connectNativeBridge,
     ownsObservedTab: globalThis._cwaPersistentObserverOwnsTab ?? null,
+    nativeMessageCapabilities,
   });
 }

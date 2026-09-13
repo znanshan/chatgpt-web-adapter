@@ -60,3 +60,45 @@ def test_production_entry_declares_single_named_callback_owners() -> None:
     assert "createStreamLifecycle" in source
     assert "executeNativeTurn =" not in source
     assert "onNativeMessage =" not in source
+
+
+def test_native_message_router_has_single_production_owner() -> None:
+    legacy = (PRODUCTION / "legacy_runtime.js").read_text(encoding="utf-8")
+    entry = (PRODUCTION / "service_worker_entry.js").read_text(encoding="utf-8")
+    router = (PRODUCTION / "native_message_router.js").read_text(encoding="utf-8")
+    assert "onNativeMessage =" not in legacy
+    assert "PriorOnNativeMessage" not in legacy
+    assert "installNativeMessageRouter" in entry
+    assert "createNativeMessageRouter" in entry
+    assert "installNativeMessageRouter" not in router
+
+
+def test_native_message_router_explicitly_owns_all_stable_native_routes() -> None:
+    router = (PRODUCTION / "native_message_router.js").read_text(encoding="utf-8")
+    expected = {
+        "release_runtime_tab",
+        "external_operation_ack",
+        "external_operation_status",
+        "external_operation_result",
+        "external_operation_events",
+        "characterize",
+        "running_snapshot",
+        "observe_turn",
+        "observe_list_surface",
+    }
+    for message_type in expected:
+        assert f'"{message_type}"' in router
+    assert "fallbackNativeMessage" in router
+    assert "browserless" not in router.lower()
+    assert "fetch(" not in router
+
+
+def test_native_bridge_starts_only_after_production_router_is_installed() -> None:
+    legacy = (PRODUCTION / "legacy_runtime.js").read_text(encoding="utf-8")
+    entry = (PRODUCTION / "service_worker_entry.js").read_text(encoding="utf-8")
+    assert "startNativeBridge: connectNativeBridge" in legacy
+    assert entry.index("installNativeMessageRouter(nativeMessageRouter)") < entry.index("legacyRuntime.startNativeBridge()")
+    marker = "chrome.runtime.onStartup.addListener(() => connectNativeBridge());"
+    assert marker in legacy
+    after_listeners = legacy.split(marker, 1)[1]
+    assert "\nconnectNativeBridge();" not in after_listeners.split("// Transitional Task-5 boundary:", 1)[0]
