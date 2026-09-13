@@ -26,9 +26,15 @@ function _pr88EffortGeometryExpression() {
     const effort = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER. This deployment renders the composer's
+      // effort control as the Chinese single character "高"; an English+Russian-only table classifies the
+      // real control to null, and the caller then reports the control as MISSING, which blocks the submit.
+      // Chinese labels are matched with includes()/equality, never \\b: there is no word boundary between
+      // CJK characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const dimension = (value) => {

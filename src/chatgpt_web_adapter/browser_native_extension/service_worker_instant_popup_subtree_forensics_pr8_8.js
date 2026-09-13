@@ -72,10 +72,15 @@ function _pr88PopupDomExpression() {
       const text = normalize(value);
       if (!text) return [];
       const out = [];
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) out.push('INSTANT');
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text.includes('thinking standard')) out.push('MEDIUM');
-      if (text.includes('extra high') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
-      else if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text.includes('thinking extended')) out.push('HIGH');
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER. This deployment renders the composer's
+      // effort control as the Chinese single character "高"; an English+Russian-only table classifies the
+      // real control to nothing, and every caller that trusts this list then reports the control as
+      // MISSING, which blocks the submit. Chinese labels use includes()/equality, never \\b: there is no
+      // word boundary between CJK characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) out.push('INSTANT');
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) out.push('MEDIUM');
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий') || text.includes('thinking heavy')) out.push('EXTRA_HIGH');
+      else if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) out.push('HIGH');
       if (text.includes('pro standard')) out.push('PRO_STANDARD');
       if (text.includes('pro extended')) out.push('PRO_EXTENDED');
       if (text === 'thinking') out.push('REASONING_OTHER');

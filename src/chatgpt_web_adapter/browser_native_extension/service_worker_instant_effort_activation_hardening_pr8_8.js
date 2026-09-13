@@ -10,9 +10,17 @@ function _pr88InstantEffortRelaxedSliderExpression(action) {
     const effort = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // LOCALE LABELS -- THE SAME TABLE IN EVERY CLASSIFIER, AND THIS FILE HAS TWO OF THEM. Fixing only
+      // the trigger expression above left THIS one English+Russian-only, and the relaxed slider contract
+      // is what a fresh chat page falls back to: measured 2026-09-13 12:48 on OH, a rollover then died
+      // with PR8_10_MODEL_PROFILE_SLIDER_CONTRACT_NOT_PROVEN:current_effort_control_missing while the
+      // effort pill sat 10 px from the composer with the Chinese single character as its only label.
+      // Chinese labels use includes()/equality, never \\b: there is no word boundary between CJK
+      // characters and the surrounding text.
+      if (/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if (text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if (/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if (/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const visible = (el) => {
@@ -122,9 +130,28 @@ function _pr88InstantEffortTriggerExpression(action) {
     const effort=(value)=>{
       const text=normalize(value);
       if(!text) return null;
-      if(/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text)) return 'INSTANT';
-      if(/(^|\\b)(medium|средний)(\\b|$)/.test(text)) return 'MEDIUM';
-      if(/(^|\\b)(high|высокий)(\\b|$)/.test(text)) return 'HIGH';
+      // THE FIFTH MODE-LABEL TABLE, AND THE ONE 62f35b5 MISSED. That commit made four classifiers
+      // locale-agnostic after the live control rendered as the Chinese single character "高" and the
+      // English+Russian table classified it to null; this expression kept the old table, so the SAME
+      // page produced trigger_missing from here while every other path saw the control.
+      //
+      // NOTE FOR THE NEXT EDITOR: this source lives inside a backtick template literal, so a backtick
+      // anywhere in these comments (or in the JS below) terminates it and the FILE stops parsing. The
+      // adapter's own JavaScript-parse test catches that; nothing else does.
+      //
+      // Measured 2026-09-13 on OH: the effort pill is a button whose only label is the Chinese single
+      // character, this table returned candidateCount 0, and the fresh-conversation write died with
+      // PR8_8_INSTANT_EFFORT_TRIGGER_FOCUS_NOT_PROVEN twice in a row -- so a project that had lost its
+      // plugin capability could not be rolled onto a fresh conversation at all. The message names FOCUS
+      // because the caller reports the whole conjunction with one name, which is why the DOM had to be
+      // measured instead of the error read.
+      //
+      // Chinese labels use includes()/equality, never \b: there is no word boundary between CJK and
+      // the surrounding text, so a \b pattern would look fixed and match nothing.
+      if(/(^|\\b)(instant|мгновенно)(\\b|$)/.test(text) || text.includes('即时')) return 'INSTANT';
+      if(text.includes('extra high') || text.includes('极高') || text.includes('очень высокий')) return 'EXTRA_HIGH';
+      if(/(^|\\b)(medium|средний)(\\b|$)/.test(text) || text === '中' || text.includes('thinking standard')) return 'MEDIUM';
+      if(/(^|\\b)(high|высокий)(\\b|$)/.test(text) || text === '高' || text.includes('thinking extended')) return 'HIGH';
       return null;
     };
     const visible=(el)=>{

@@ -178,7 +178,7 @@ def test_selection_worker_mutates_only_picker_before_prompt_and_tracks_network_b
 
 
 def test_both_mode_classifiers_accept_the_same_locale_labels():
-    """The two tables must agree about the LOCALE LABELS, and cover the locale this deployment uses.
+    """EVERY table that classifies the composer's effort control must know this deployment's labels.
 
     Why this exists -- measured 2026-09-12 on the Temp runtime. The control this classifier has to
     find rendered as the Chinese single character "高" (10 px from the composer). This file's table
@@ -191,31 +191,63 @@ def test_both_mode_classifiers_accept_the_same_locale_labels():
     characters all along. Two tables that disagree about the same UI is how "the mode is fine" and
     "the picker is missing" get reported for one page.
 
-    Only the LOCALE labels are compared, not every literal: the two tables legitimately differ in
-    their English phrasings (instant_mode matches the long "thinking standard/heavy/extended" forms
-    with `includes`, this one with the terse ones), and asserting full equality would fail on that
-    legitimate difference instead of on a locale gap.
+    AND A FIFTH TABLE WAS MISSED BY THE FIX THAT ADDED THIS TEST, so the test now discovers the
+    tables instead of naming them. Measured 2026-09-13 on OH: the effort pill is
+    `<button>高</button>` with no aria-label and no title;
+    `service_worker_instant_effort_activation_hardening_pr8_8.js` still carried the English+Russian
+    table, so `_pr88InstantEffortTriggerExpression` returned candidateCount 0 and the writer died with
+    `PR8_8_INSTANT_EFFORT_TRIGGER_FOCUS_NOT_PROVEN` twice in a row -- which meant a project that had
+    lost its plugin capability could not be rolled onto a fresh conversation at all. Naming the files
+    is what let that happen; discovery cannot.
+
+    Only the LOCALE labels are compared, not every literal: the tables legitimately differ in their
+    English phrasings (instant_mode matches the long "thinking standard/heavy/extended" forms with
+    `includes`, others use the terse ones), and asserting full equality would fail on that legitimate
+    difference instead of on a locale gap.
     """
     import re
 
     root = browser_native_extension_dir()
-    locale_characters = {"即时", "中", "高", "极高", "мгновенно", "средний", "высокий", "очень высокий"}
+    # EVERY STATEMENT THAT CLASSIFIES A LABEL INTO A MODE, not every file. A file-level check cannot see
+    # a SECOND table inside the same file, and that is exactly how this hid: after the trigger expression
+    # in service_worker_instant_effort_activation_hardening_pr8_8.js was fixed, the relaxed-slider
+    # expression in that SAME file still carried the English+Russian-only table, and the fresh-chat
+    # rollover then died with PR8_10_MODEL_PROFILE_SLIDER_CONTRACT_NOT_PROVEN:current_effort_control_missing
+    # (measured 2026-09-13 12:48 on OH).
+    #
+    # THE LABEL MUST BE QUOTED, AND IT MUST BE CHINESE. The terse Russian words live inside the REGEX
+    # LITERALS of the unfixed lines, so an unquoted membership test passes on the very lines that are
+    # broken (measured: the first version of this assertion reported zero offenders against a table with
+    # no Chinese labels at all). This deployment renders 即时 / 中 / 高 / 极高, so those are required.
+    classifier = re.compile(r"^\s*(?:\}\s*)?(?:else\s+)?if\s*\(.*\)\s*(?:return|out\.push)\s*\(?\s*"
+                            r"'(INSTANT|MEDIUM|HIGH|EXTRA_HIGH)'")
+    chinese_label = re.compile(r"'(即时|中|高|极高)'")
 
-    def locale_labels(filename: str) -> set[str]:
-        text = (root / filename).read_text(encoding="utf-8")
-        return {label for label in re.findall(r"text === '([^']+)'", text)
-                if label in locale_characters}
+    checked = 0
+    offenders: list[str] = []
+    for path in sorted(root.glob("*.js")):
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), start=1):
+            match = classifier.match(line)
+            if not match:
+                continue
+            checked += 1
+            if not chinese_label.search(line):
+                offenders.append(f"{path.name}:{number} [{match.group(1)}] {line.strip()[:110]}")
 
-    repair = locale_labels("service_worker_instant_selection_repair_pr8_8.js")
-    instant = locale_labels("service_worker_instant_mode_pr8_8.js")
+    assert checked >= 20, f"the classifier statements were not discovered: only {checked}"
+    assert offenders == [], (
+        "these statements classify a label into a mode without knowing the Chinese labels this "
+        "deployment renders, so the real control classifies to nothing and the caller reports it as "
+        "missing -- which blocks the submit:\n  " + "\n  ".join(offenders))
 
-    # The locale this deployment actually renders. Without these the submit cannot be located.
-    for label in ("即时", "中", "高", "极高"):
-        assert label in repair, f"the selection-point classifier cannot see the label {label!r}"
-    assert repair == instant, (
-        "the two mode-label tables disagree about the non-English labels, which is how one path "
-        f"reports a mode while the other reports picker_missing. repair-only={sorted(repair - instant)} "
-        f"instant-only={sorted(instant - repair)}")
+    # The relaxed/picker variants must AGREE with each other on the Chinese labels: a table that knows
+    # 高 but not 极高 would silently downgrade extra-high to high.
+    for name in ("service_worker_instant_effort_activation_hardening_pr8_8.js",
+                 "service_worker_instant_effort_slider_contract_pr8_8.js",
+                 "service_worker_instant_selection_repair_pr8_8.js"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "极高" in text, f"{name} cannot see the label '极高'"
 
 
 def test_provider_parses_lease_fenced_selection_record(monkeypatch):
