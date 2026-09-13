@@ -189,7 +189,7 @@ async function ensureRuntimeTab(conversationId) {
   return tab;
 }
 
-chrome.tabs.onRemoved.addListener(async (tabId) => {
+async function _productionRuntimeTabRemoved(tabId) {
   const storedId = await storedRuntimeTabId();
   if (storedId === tabId) {
     await chrome.storage.local.remove(RUNTIME_TAB_KEY);
@@ -199,7 +199,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       runtimeTabId: null
     });
   }
-});
+}
 
 async function queryComposerReadiness(debuggee) {
   const result = await sendCommand(debuggee, "Runtime.evaluate", {
@@ -826,13 +826,13 @@ function _markSubmitObserved(tabId) {
   }
 }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
+function _productionSubmitAckDebuggerEvent(source, method, params) {
   if (!Number.isInteger(source?.tabId) || method !== "Network.requestWillBeSent") return;
   const request = params?.request;
   if (_isConversationWrite(request?.url || "", request?.method || "")) {
     _markSubmitObserved(source.tabId);
   }
-});
+}
 
 async function _waitForSubmitAck(tabId, timeoutMs) {
   const state = _submitStateByTabId.get(tabId);
@@ -9507,7 +9507,7 @@ function _pr813InspectPausedConversationRequest(context, request) {
   };
 }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
+function _productionTemporaryDebuggerEvent(source, method, params) {
   const context = _pr813TemporaryTurnContext;
   if (context === null || method !== "Fetch.requestPaused" || source?.tabId !== context.tabId) {
     return;
@@ -9545,7 +9545,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
         new Error(`PR8_13_TEMPORARY_REQUEST_CONTINUE_FAILED:${String(error)}`)
       );
     });
-});
+}
 
 ensureRuntimeTab = async function _pr813EnsureRuntimeTab(conversationId) {
   const context = _pr813TemporaryTurnContext;
@@ -9724,7 +9724,7 @@ const _productionTurnStage21 = async function _pr813ExecuteNativeTurn(message) {
   return _pr813ExecuteTemporaryTurn(message);
 };
 
-chrome.tabs.onRemoved.addListener(async (tabId) => {
+async function _productionTemporaryTabRemoved(tabId) {
   const live = _pr813LiveTemporaryLifecycle;
   if (live && live.tabId === tabId) {
     live.state = "ENDED";
@@ -9732,7 +9732,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   }
   const stored = await _pr813StoredTemporaryTabId();
   if (stored === tabId) await _pr813ClearStoredTemporaryTabId(tabId);
-});
+}
+
 
 /* END legacy source: service_worker_temporary_chat_production_pr8_13.js */
 
@@ -10373,7 +10374,7 @@ async function _pr824a3PublishValidatedRuntimeState() {
   return state;
 }
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+function _productionRuntimeTabUpdated(tabId, changeInfo, tab) {
   if (typeof changeInfo?.url !== "string") return;
   _pr824a3RawStoredRuntimeTabId().then(async (storedId) => {
     if (storedId !== tabId) return;
@@ -10381,9 +10382,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (isChatGPTUrl(nextUrl)) return;
     await _pr824a3ClearStoredRuntimeTabIdIfMatches(tabId);
   }).catch(() => {});
-});
+}
 
-chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+function _productionRuntimeTabReplaced(addedTabId, removedTabId) {
   _pr824a3RawStoredRuntimeTabId().then(async (storedId) => {
     if (storedId !== removedTabId) return;
     try {
@@ -10397,7 +10398,7 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
     }
     await _pr824a3ClearStoredRuntimeTabIdIfMatches(removedTabId);
   }).catch(() => {});
-});
+}
 
 _pr824a3PublishValidatedRuntimeState().catch(() => {});
 
@@ -21686,20 +21687,9 @@ async function _cwaCharStart(sessionId, context = null) {
 
 
 function _cwaCharActivateListeners() {
-  chrome.debugger.onEvent.addListener(_cwaCharOnDebuggerEvent);
-  _cwaCharTabUpdatedListener = _cwaCharOnTabUpdated;
-  chrome.tabs.onUpdated.addListener(_cwaCharTabUpdatedListener);
-  _cwaCharTabActivatedListener = (activeInfo) => {
-    if (!_cwaCharActive) return;
-    _cwaCharPush({ source: "tab", kind: "activated", tabId: activeInfo?.tabId ?? null });
-  };
-  chrome.tabs.onActivated.addListener(_cwaCharTabActivatedListener);
-  _cwaCharTabRemovedListener = (tabId) => {
-    if (!_cwaCharActive) return;
-    _cwaCharPush({ source: "tab", kind: "removed", tabId });
-  };
-  chrome.tabs.onRemoved.addListener(_cwaCharTabRemovedListener);
-  _cwaCharDomTimer = setInterval(() => { void _cwaCharDomProbeOnce(); }, CWA_CHARACTERIZATION_DOM_INTERVAL_MS);
+  if (_cwaCharDomTimer === null) {
+    _cwaCharDomTimer = setInterval(() => { void _cwaCharDomProbeOnce(); }, CWA_CHARACTERIZATION_DOM_INTERVAL_MS);
+  }
 }
 async function _cwaCharStop() {
   if (!_cwaCharActive) return { ok: false, error: "CHARACTERIZE_NOT_ACTIVE" };
@@ -21710,19 +21700,6 @@ async function _cwaCharStop() {
   if (_cwaCharDomTimer !== null) {
     clearInterval(_cwaCharDomTimer);
     _cwaCharDomTimer = null;
-  }
-  chrome.debugger.onEvent.removeListener(_cwaCharOnDebuggerEvent);
-  if (_cwaCharTabUpdatedListener) {
-    chrome.tabs.onUpdated.removeListener(_cwaCharTabUpdatedListener);
-    _cwaCharTabUpdatedListener = null;
-  }
-  if (_cwaCharTabActivatedListener) {
-    chrome.tabs.onActivated.removeListener(_cwaCharTabActivatedListener);
-    _cwaCharTabActivatedListener = null;
-  }
-  if (_cwaCharTabRemovedListener) {
-    chrome.tabs.onRemoved.removeListener(_cwaCharTabRemovedListener);
-    _cwaCharTabRemovedListener = null;
   }
   const summary = {
     ok: true,
@@ -22482,7 +22459,7 @@ function _cwaRecordConversationRequest(tabId, params) {
   }).catch(() => {});
 }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
+function _productionPersistentDebuggerEvent(source, method, params) {
   const tabId = source?.tabId;
   if (!Number.isInteger(tabId) || !_cwaObservedTabs.has(tabId)) return;
   if (method === "Network.requestWillBeSent") {
@@ -22510,9 +22487,9 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   } else if (method === "Network.loadingFinished") {
     _cwaFinish(record, "COMPLETED", "network_finished");
   }
-});
+}
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+function _productionPersistentTabUpdated(tabId, changeInfo, tab) {
   if (!_cwaObservedTabs.has(tabId) || !changeInfo.url) return;
   const record = _cwaLatestByTab.get(tabId);
   if (!record) return;
@@ -22521,16 +22498,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     record.conversationId = conversationId;
     _cwaTouch(record);
   }
-});
+}
 
-chrome.debugger.onDetach.addListener((source, reason) => {
+function _productionPersistentDebuggerDetach(source, reason) {
   const tabId = source?.tabId;
   if (!Number.isInteger(tabId) || !_cwaObservedTabs.delete(tabId)) return;
   const record = _cwaLatestByTab.get(tabId);
   if (record?.state === "RUNNING") {
     _cwaFinish(record, "FAILED", "observer_detached", reason || "DEBUGGER_DETACHED");
   }
-});
+}
 
 async function _cwaEnsurePersistentObserver(tabId) {
   if (_cwaObservedTabs.has(tabId)) return;
@@ -22705,6 +22682,27 @@ export function installNativeMessageRouter(router) {
 }
 
 export function getLegacyRuntimeCallbacks() {
+  const streamLifecycleCapabilities = Object.freeze({
+    runtimeTabRemoved: _productionRuntimeTabRemoved,
+    submitAckDebuggerEvent: _productionSubmitAckDebuggerEvent,
+    runtimeTabUpdated: _productionRuntimeTabUpdated,
+    runtimeTabReplaced: _productionRuntimeTabReplaced,
+    temporaryDebuggerEvent: _productionTemporaryDebuggerEvent,
+    temporaryTabRemoved: _productionTemporaryTabRemoved,
+    externalOperationDebuggerEvent: _cwaCharOnDebuggerEvent,
+    externalOperationTabUpdated: _cwaCharOnTabUpdated,
+    externalOperationTabActivated: (activeInfo) => {
+      if (!_cwaCharActive) return;
+      _cwaCharPush({ source: "tab", kind: "activated", tabId: activeInfo?.tabId ?? null });
+    },
+    externalOperationTabRemoved: (tabId) => {
+      if (!_cwaCharActive) return;
+      _cwaCharPush({ source: "tab", kind: "removed", tabId });
+    },
+    persistentDebuggerEvent: _productionPersistentDebuggerEvent,
+    persistentTabUpdated: _productionPersistentTabUpdated,
+    persistentDebuggerDetach: _productionPersistentDebuggerDetach,
+  });
   const nativeMessageCapabilities = Object.freeze({
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
     postNativeResult: safePortPost,
@@ -22731,5 +22729,6 @@ export function getLegacyRuntimeCallbacks() {
     startNativeBridge: connectNativeBridge,
     ownsObservedTab: globalThis._cwaPersistentObserverOwnsTab ?? null,
     nativeMessageCapabilities,
+    streamLifecycleCapabilities,
   });
 }

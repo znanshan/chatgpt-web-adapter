@@ -39,6 +39,25 @@ _NATIVE_ROUTER_ASSIGNMENTS: dict[str, tuple[str, str | None]] = {
         "// Resident list surface:",
     ),
 }
+
+_STREAM_LISTENER_REWRITES: dict[str, tuple[tuple[str, str | None, str], ...]] = {
+    "service_worker.js": (("chrome.tabs.onRemoved.addListener(async (tabId) => {", "async function queryComposerReadiness", "async function _productionRuntimeTabRemoved(tabId) {"),),
+    "service_worker_hotfix.js": (("chrome.debugger.onEvent.addListener((source, method, params) => {", "async function _waitForSubmitAck", "function _productionSubmitAckDebuggerEvent(source, method, params) {"),),
+    "service_worker_runtime_tab_reconciliation.js": (
+        ("chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {", "chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {", "function _productionRuntimeTabUpdated(tabId, changeInfo, tab) {"),
+        ("chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {", "_pr824a3PublishValidatedRuntimeState().catch(() => {});", "function _productionRuntimeTabReplaced(addedTabId, removedTabId) {"),
+    ),
+    "service_worker_temporary_chat_production_pr8_13.js": (
+        ("chrome.debugger.onEvent.addListener((source, method, params) => {", "ensureRuntimeTab = async function _pr813EnsureRuntimeTab", "function _productionTemporaryDebuggerEvent(source, method, params) {"),
+        ("chrome.tabs.onRemoved.addListener(async (tabId) => {", None, "async function _productionTemporaryTabRemoved(tabId) {"),
+    ),
+    "service_worker_persistent_turn_observer_v3.js": (
+        ("chrome.debugger.onEvent.addListener((source, method, params) => {", "chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {", "function _productionPersistentDebuggerEvent(source, method, params) {"),
+        ("chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {", "chrome.debugger.onDetach.addListener((source, reason) => {", "function _productionPersistentTabUpdated(tabId, changeInfo, tab) {"),
+        ("chrome.debugger.onDetach.addListener((source, reason) => {", "async function _cwaEnsurePersistentObserver", "function _productionPersistentDebuggerDetach(source, reason) {"),
+    ),
+}
+
 _PREFIX = (
     "// Generated transitional runtime for Task 5.\n"
     "// Native-message dispatch is installed once by production/service_worker_entry.js.\n"
@@ -67,6 +86,27 @@ _EXPORT_TAIL = (
     "  _productionNativeMessageRouter = router;\n"
     "}\n\n"
     "export function getLegacyRuntimeCallbacks() {\n"
+    "  const streamLifecycleCapabilities = Object.freeze({\n"
+    "    runtimeTabRemoved: _productionRuntimeTabRemoved,\n"
+    "    submitAckDebuggerEvent: _productionSubmitAckDebuggerEvent,\n"
+    "    runtimeTabUpdated: _productionRuntimeTabUpdated,\n"
+    "    runtimeTabReplaced: _productionRuntimeTabReplaced,\n"
+    "    temporaryDebuggerEvent: _productionTemporaryDebuggerEvent,\n"
+    "    temporaryTabRemoved: _productionTemporaryTabRemoved,\n"
+    "    externalOperationDebuggerEvent: _cwaCharOnDebuggerEvent,\n"
+    "    externalOperationTabUpdated: _cwaCharOnTabUpdated,\n"
+    "    externalOperationTabActivated: (activeInfo) => {\n"
+    "      if (!_cwaCharActive) return;\n"
+    "      _cwaCharPush({ source: \"tab\", kind: \"activated\", tabId: activeInfo?.tabId ?? null });\n"
+    "    },\n"
+    "    externalOperationTabRemoved: (tabId) => {\n"
+    "      if (!_cwaCharActive) return;\n"
+    "      _cwaCharPush({ source: \"tab\", kind: \"removed\", tabId });\n"
+    "    },\n"
+    "    persistentDebuggerEvent: _productionPersistentDebuggerEvent,\n"
+    "    persistentTabUpdated: _productionPersistentTabUpdated,\n"
+    "    persistentDebuggerDetach: _productionPersistentDebuggerDetach,\n"
+    "  });\n"
     "  const nativeMessageCapabilities = Object.freeze({\n"
     "    protocolVersion: BRIDGE_PROTOCOL_VERSION,\n"
     "    postNativeResult: safePortPost,\n"
@@ -93,10 +133,73 @@ _EXPORT_TAIL = (
     "    startNativeBridge: connectNativeBridge,\n"
     "    ownsObservedTab: globalThis._cwaPersistentObserverOwnsTab ?? null,\n"
     "    nativeMessageCapabilities,\n"
+    "    streamLifecycleCapabilities,\n"
     "  });\n"
     "}\n"
 )
 
+
+
+def _rewrite_listener_block(name: str, text: str, start_marker: str, end_marker: str | None, declaration: str) -> str:
+    start = text.find(start_marker)
+    if start < 0:
+        raise RuntimeError(f"stream listener start marker missing: {name}: {start_marker}")
+    end = len(text) if end_marker is None else text.find(end_marker, start)
+    if end < 0:
+        raise RuntimeError(f"stream listener end marker missing: {name}: {end_marker}")
+    block = text[start:end].rstrip()
+    if not block.endswith("});"):
+        raise RuntimeError(f"stream listener closure mismatch: {name}: {start_marker}")
+    body = block[len(start_marker):-3]
+    return text[:start] + declaration + body + "}\n\n" + text[end:]
+
+
+def _rewrite_stream_lifecycle(name: str, text: str) -> str:
+    for start_marker, end_marker, declaration in _STREAM_LISTENER_REWRITES.get(name, ()):
+        text = _rewrite_listener_block(name, text, start_marker, end_marker, declaration)
+    if name == "service_worker_external_operation_v2_1.js":
+        old_activate = '''function _cwaCharActivateListeners() {
+  chrome.debugger.onEvent.addListener(_cwaCharOnDebuggerEvent);
+  _cwaCharTabUpdatedListener = _cwaCharOnTabUpdated;
+  chrome.tabs.onUpdated.addListener(_cwaCharTabUpdatedListener);
+  _cwaCharTabActivatedListener = (activeInfo) => {
+    if (!_cwaCharActive) return;
+    _cwaCharPush({ source: "tab", kind: "activated", tabId: activeInfo?.tabId ?? null });
+  };
+  chrome.tabs.onActivated.addListener(_cwaCharTabActivatedListener);
+  _cwaCharTabRemovedListener = (tabId) => {
+    if (!_cwaCharActive) return;
+    _cwaCharPush({ source: "tab", kind: "removed", tabId });
+  };
+  chrome.tabs.onRemoved.addListener(_cwaCharTabRemovedListener);
+  _cwaCharDomTimer = setInterval(() => { void _cwaCharDomProbeOnce(); }, CWA_CHARACTERIZATION_DOM_INTERVAL_MS);
+}'''
+        new_activate = '''function _cwaCharActivateListeners() {
+  if (_cwaCharDomTimer === null) {
+    _cwaCharDomTimer = setInterval(() => { void _cwaCharDomProbeOnce(); }, CWA_CHARACTERIZATION_DOM_INTERVAL_MS);
+  }
+}'''
+        if old_activate not in text:
+            raise RuntimeError("external operation listener activation marker missing")
+        text = text.replace(old_activate, new_activate, 1)
+        old_remove = '''  chrome.debugger.onEvent.removeListener(_cwaCharOnDebuggerEvent);
+  if (_cwaCharTabUpdatedListener) {
+    chrome.tabs.onUpdated.removeListener(_cwaCharTabUpdatedListener);
+    _cwaCharTabUpdatedListener = null;
+  }
+  if (_cwaCharTabActivatedListener) {
+    chrome.tabs.onActivated.removeListener(_cwaCharTabActivatedListener);
+    _cwaCharTabActivatedListener = null;
+  }
+  if (_cwaCharTabRemovedListener) {
+    chrome.tabs.onRemoved.removeListener(_cwaCharTabRemovedListener);
+    _cwaCharTabRemovedListener = null;
+  }
+'''
+        if old_remove not in text:
+            raise RuntimeError("external operation listener removal marker missing")
+        text = text.replace(old_remove, "", 1)
+    return text
 
 def _strip_native_router_wrapper(name: str, text: str) -> str:
     prior = _NATIVE_ROUTER_PRIORS.get(name)
@@ -146,6 +249,7 @@ def flatten_script(name: str, stack: tuple[str, ...] = ()) -> str:
         raise RuntimeError(f"import cycle: {stack + (name,)}")
     text = (EXTENSION_ROOT / name).read_text(encoding="utf-8")
     text = _strip_native_router_wrapper(name, text)
+    text = _rewrite_stream_lifecycle(name, text)
     text = _rewrite_base_dispatch(name, text)
     output: list[str] = []
     position = 0

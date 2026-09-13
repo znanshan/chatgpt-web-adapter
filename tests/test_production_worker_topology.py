@@ -115,3 +115,42 @@ def test_turn_executor_has_one_immutable_production_owner() -> None:
     assert "const composedTurnExecutor = _productionTurnStage64;" in legacy
     assert "executeTurn: composedTurnExecutor" in legacy
     assert "await composedTurnExecutor(message)" in legacy
+
+
+def test_stream_lifecycle_has_one_production_registration_owner() -> None:
+    legacy = (PRODUCTION / "legacy_runtime.js").read_text(encoding="utf-8")
+    entry = (PRODUCTION / "service_worker_entry.js").read_text(encoding="utf-8")
+    lifecycle = (PRODUCTION / "stream_lifecycle.js").read_text(encoding="utf-8")
+    persistent_registration = re.compile(
+        r"^chrome\.(?:debugger\.(?:onEvent|onDetach)|tabs\.(?:onUpdated|onRemoved|onReplaced|onActivated))\.addListener",
+        re.MULTILINE,
+    )
+    assert persistent_registration.findall(legacy) == []
+    assert "chrome.debugger.onEvent.addListener(_cwaCharOnDebuggerEvent)" not in legacy
+    assert "chrome.debugger.onEvent.removeListener(_cwaCharOnDebuggerEvent)" not in legacy
+    assert 'from "./stream_lifecycle.js"' in entry
+    assert "createStreamLifecycle" in entry
+    assert entry.index("streamLifecycle.install()") < entry.index("legacyRuntime.startNativeBridge()")
+    for event_name in ("debugger.onEvent", "debugger.onDetach", "tabs.onUpdated", "tabs.onRemoved", "tabs.onReplaced", "tabs.onActivated"):
+        assert lifecycle.count(f"chromeApi.{event_name}.addListener") == 1
+
+
+def test_stream_lifecycle_exposes_stable_semantic_delegates() -> None:
+    legacy = (PRODUCTION / "legacy_runtime.js").read_text(encoding="utf-8")
+    expected = {
+        "runtimeTabRemoved",
+        "submitAckDebuggerEvent",
+        "runtimeTabUpdated",
+        "runtimeTabReplaced",
+        "temporaryDebuggerEvent",
+        "temporaryTabRemoved",
+        "externalOperationDebuggerEvent",
+        "externalOperationTabUpdated",
+        "externalOperationTabActivated",
+        "externalOperationTabRemoved",
+        "persistentDebuggerEvent",
+        "persistentTabUpdated",
+        "persistentDebuggerDetach",
+    }
+    for name in expected:
+        assert f"{name}:" in legacy
