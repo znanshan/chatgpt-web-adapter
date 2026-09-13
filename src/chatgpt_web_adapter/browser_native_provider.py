@@ -275,6 +275,9 @@ class BrowserNativeTurnProvider:
         *,
         action: str,
         session_id: str | None = None,
+        conversation_ref: str | None = None,
+        attempt_id: str | None = None,
+        turn_id: str | None = None,
         timeout: float = 5.0,
     ) -> dict[str, Any]:
         """Drive the extension's inert bounded event-observation recorder.
@@ -293,6 +296,16 @@ class BrowserNativeTurnProvider:
         }
         if session_id is not None:
             payload["session_id"] = session_id
+        for name, value in (
+            ("conversation_ref", conversation_ref),
+            ("attempt_id", attempt_id),
+            ("turn_id", turn_id),
+        ):
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string or None")
+            payload[name] = value.strip()
         response = self._rpc(payload, timeout=timeout + self.connect_timeout)
         if response.get("request_id") != request_id:
             raise RequestError(
@@ -317,12 +330,23 @@ class BrowserNativeTurnProvider:
         return value.strip()
 
     def start_external_operation_observation(
-        self, operation_id: str, *, timeout: float = 5.0
+        self,
+        operation_id: str,
+        *,
+        conversation_ref: str | None = None,
+        attempt_id: str | None = None,
+        turn_id: str | None = None,
+        timeout: float = 5.0,
     ) -> dict[str, Any]:
-        """Start one bounded page-owned observation without submitting a turn."""
+        """Start/resume page-owned observation with caller-known provenance only."""
         operation_id = self._external_operation_id(operation_id)
         result = self.characterize_control(
-            action="start", session_id=operation_id, timeout=timeout
+            action="start",
+            session_id=operation_id,
+            conversation_ref=conversation_ref,
+            attempt_id=attempt_id,
+            turn_id=turn_id,
+            timeout=timeout,
         )
         if result.get("session_id") != operation_id:
             raise RequestError(
@@ -404,6 +428,119 @@ class BrowserNativeTurnProvider:
             events=events,
             next_cursor=next_cursor,
             has_more=has_more,
+        )
+
+    def _external_operation_rpc(
+        self,
+        message_type: str,
+        operation_id: str,
+        *,
+        timeout: float,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        operation_id = self._external_operation_id(operation_id)
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        request_id = str(uuid.uuid4())
+        response = self._rpc(
+            {
+                "type": message_type,
+                "request_id": request_id,
+                "operation_id": operation_id,
+                "timeoutMs": int(timeout * 1000),
+                **fields,
+            },
+            timeout=timeout + self.connect_timeout,
+        )
+        if response.get("request_id") != request_id:
+            raise RequestError(
+                "BROWSER_NATIVE_RESPONSE_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        if not response.get("ok"):
+            raise RequestError(
+                str(response.get("error") or "BROWSER_NATIVE_EXTERNAL_OPERATION_FAILED"),
+                request_stage="browser_native_external_operation",
+            )
+        if response.get("operation_id") != operation_id:
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        return {
+            key: value
+            for key, value in response.items()
+            if key not in {"protocol", "type", "request_id", "ok"}
+        }
+
+    def ack_external_operation_events(
+        self,
+        operation_id: str,
+        *,
+        cursor: str,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        """Acknowledge the last durably applied public event cursor."""
+        if not isinstance(cursor, str) or not cursor:
+            raise ValueError("cursor must be a non-empty string")
+        result = self._external_operation_rpc(
+            "external_operation_ack", operation_id, timeout=timeout, cursor=cursor
+        )
+        if result.get("cursor") != cursor:
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_ACK_MISMATCH",
+                request_stage="browser_native_external_operation",
+            )
+        return result
+
+    @staticmethod
+    def _validate_external_operation_summary(result: dict[str, Any]) -> dict[str, Any]:
+        status = result.get("status")
+        if status not in {"running", "completed", "failed", "retryable", "unknown"}:
+            raise RequestError(
+                "BROWSER_NATIVE_EXTERNAL_OPERATION_STATUS_INVALID",
+                request_stage="browser_native_external_operation",
+            )
+        for name in ("event_count", "terminal_markers"):
+            value = result.get(name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise RequestError(
+                    f"BROWSER_NATIVE_EXTERNAL_OPERATION_{name.upper()}_INVALID",
+                    request_stage="browser_native_external_operation",
+                )
+        for name in ("failed", "retryable"):
+            if not isinstance(result.get(name), bool):
+                raise RequestError(
+                    f"BROWSER_NATIVE_EXTERNAL_OPERATION_{name.upper()}_INVALID",
+                    request_stage="browser_native_external_operation",
+                )
+        for name in ("cursor", "acked_cursor"):
+            value = result.get(name)
+            if value is not None and not isinstance(value, str):
+                raise RequestError(
+                    f"BROWSER_NATIVE_EXTERNAL_OPERATION_{name.upper()}_INVALID",
+                    request_stage="browser_native_external_operation",
+                )
+        return result
+
+    def external_operation_status(
+        self, operation_id: str, *, timeout: float = 5.0
+    ) -> dict[str, Any]:
+        """Return provider-owned public status without a browserless canonical read."""
+        return self._validate_external_operation_summary(
+            self._external_operation_rpc(
+                "external_operation_status", operation_id, timeout=timeout
+            )
+        )
+
+    def external_operation_result(
+        self, operation_id: str, *, timeout: float = 5.0
+    ) -> dict[str, Any]:
+        """Return the normalized provider result derived only from page-owned evidence."""
+        return self._validate_external_operation_summary(
+            self._external_operation_rpc(
+                "external_operation_result", operation_id, timeout=timeout
+            )
         )
 
     def stop_external_operation_observation(

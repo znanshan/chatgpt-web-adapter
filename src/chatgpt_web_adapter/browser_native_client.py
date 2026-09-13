@@ -57,6 +57,9 @@ def _external_operation_provider(self: Any) -> BrowserNativeTurnProvider:
     required = (
         "start_external_operation_observation",
         "read_external_operation_events",
+        "ack_external_operation_events",
+        "external_operation_status",
+        "external_operation_result",
         "stop_external_operation_observation",
     )
     if provider is None or any(not callable(getattr(provider, name, None)) for name in required):
@@ -68,10 +71,20 @@ def _external_operation_provider(self: Any) -> BrowserNativeTurnProvider:
 
 
 def start_external_operation_observation(
-    self: Any, operation_id: str, *, timeout: float = 5.0
+    self: Any,
+    operation_id: str,
+    *,
+    conversation_ref: str | None = None,
+    attempt_id: str | None = None,
+    turn_id: str | None = None,
+    timeout: float = 5.0,
 ):
     return _external_operation_provider(self).start_external_operation_observation(
-        operation_id, timeout=timeout
+        operation_id,
+        conversation_ref=conversation_ref,
+        attempt_id=attempt_id,
+        turn_id=turn_id,
+        timeout=timeout,
     )
 
 
@@ -85,6 +98,30 @@ def read_external_operation_events(
 ):
     return _external_operation_provider(self).read_external_operation_events(
         operation_id, cursor=cursor, limit=limit, timeout=timeout
+    )
+
+
+def ack_external_operation_events(
+    self: Any, operation_id: str, *, cursor: str, timeout: float = 5.0
+):
+    return _external_operation_provider(self).ack_external_operation_events(
+        operation_id, cursor=cursor, timeout=timeout
+    )
+
+
+def external_operation_status(
+    self: Any, operation_id: str, *, timeout: float = 5.0
+):
+    return _external_operation_provider(self).external_operation_status(
+        operation_id, timeout=timeout
+    )
+
+
+def external_operation_result(
+    self: Any, operation_id: str, *, timeout: float = 5.0
+):
+    return _external_operation_provider(self).external_operation_result(
+        operation_id, timeout=timeout
     )
 
 

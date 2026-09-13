@@ -106,6 +106,62 @@ def test_external_operation_events_is_a_read_not_blocked_by_active_writer(monkey
     assert result["operation_id"] == "operation-1"
 
 
+def test_external_operation_ack_status_result_are_not_blocked_by_active_writer(monkeypatch, tmp_path) -> None:
+    import chatgpt_web_adapter.browser_native_host as subject
+
+    broker = BrowserNativeBroker(state_dir=tmp_path)
+    broker.extension_connected = True
+
+    def fake_write(stream, forwarded):
+        del stream
+        operation = forwarded["type"]
+        reply = {
+            "protocol": 1,
+            "type": f"{operation}_result",
+            "request_id": forwarded["request_id"],
+            "ok": True,
+            "operation_id": forwarded["operation_id"],
+        }
+        if operation == "external_operation_ack":
+            reply["cursor"] = forwarded["cursor"]
+        else:
+            reply.update({
+                "status": "running",
+                "event_count": 1,
+                "terminal_markers": 0,
+                "failed": False,
+                "retryable": False,
+                "cursor": "operation-1:0",
+                "acked_cursor": None,
+            })
+        broker.route_native_message(reply)
+
+    monkeypatch.setattr(subject, "write_native_message", fake_write)
+    broker.turn_lock.acquire()
+    try:
+        for index, operation in enumerate((
+            "external_operation_ack",
+            "external_operation_status",
+            "external_operation_result",
+        )):
+            request = {
+                "protocol": 1,
+                "token": broker.token,
+                "type": operation,
+                "operation_id": "operation-1",
+                "request_id": f"external-meta-{index}",
+                "timeoutMs": 1000,
+            }
+            if operation == "external_operation_ack":
+                request["cursor"] = "operation-1:0"
+            result = broker.handle_local_request(request)
+            assert result["ok"] is True
+            assert result["operation_id"] == "operation-1"
+    finally:
+        broker.turn_lock.release()
+        broker._server.server_close()
+
+
 def test_observation_is_not_blocked_by_an_active_writer(monkeypatch, tmp_path) -> None:
     import chatgpt_web_adapter.browser_native_host as subject
 

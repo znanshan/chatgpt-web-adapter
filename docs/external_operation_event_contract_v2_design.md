@@ -1,9 +1,9 @@
 # External-Operation Event Contract v2 — Design (from live characterization)
 
-Status: `DRAFT` (protocol-v2 event-frame contract, derived from bounded live
-characterization findings 001/002 plus the extension/SSE vocabulary already in
-code; zero browserless HTTP reads; drives Task 3 of the external-operation
-driving plan)
+Status: `LIVE-VALIDATED ADAPTER CONTRACT` (protocol-v2 event-frame contract,
+derived from bounded live characterization findings 001/002/003/004; zero
+browserless HTTP reads; Adapter Task 3 public observation path validated on a
+real page-owned turn)
 
 ## Purpose
 
@@ -64,14 +64,20 @@ map from those plus the network lifecycle and DOM samples:
 | `runtime_reattach` / `observer_lost` | extension/broker lifecycle | reattachment |
 | `policy_banner` | DOM banner (alert observed while generating) | system notices |
 
-## Terminal semantics (finding 002)
+## Terminal semantics (findings 002/004)
 
 - `end_turn` / `assistant_terminal_conjunction` / `status=completed` are
-  per-segment markers: the SSE stream keeps delivering (dataReceived continues)
-  after them in tool-chained turns.
-- A turn is **done** only on sustained stream quiescence: no dataReceived and
-  no new terminal frames for a bounded window, combined with terminal evidence.
-  A consumer must not close the turn on the first terminal marker.
+  per-segment markers: the SSE stream may keep delivering after them in
+  tool-chained turns.
+- The transport fallback is the `stream_finished` / `Network.loadingFinished`
+  for the **conversation-write request** that produced `turn_submitted`;
+  background-request finishes are not terminal evidence.
+- A turn is **done** only on sustained stream quiescence after terminal
+  evidence. The Adapter uses a 3 s window over the latest conversation-write
+  stream data or terminal transport frame. A consumer must not close on the
+  first terminal marker, and inactivity without terminal evidence is not enough.
+- Finding 004 validated this rule on the production candidate: public status and
+  result both reached `completed` while preserving exact provenance and receipt.
 
 ## Cursor / receipt / dedup
 
@@ -90,11 +96,13 @@ map from those plus the network lifecycle and DOM samples:
   deltas) with permission tiers, retention bounds and cleanup.
 - Raw page frames stay private and are not required for the public contract.
 
-## Open items before implementation
+## Follow-up characterization
 
-- Characterize the actual SSE chunk framing end-to-end with the recorder
-  (`Network.streamResourceContent` + decoded `data:` blocks) on a real turn to
-  confirm the path vocabulary in live traffic (findings 002 item 4).
+- Characterize decoded SSE path vocabulary on additional real turns to enrich
+  generic `stream_data` into finer text/tool/metadata event types. This is an
+  evidence-quality enhancement, not a blocker for the validated transport-level
+  completion path.
 - Capture fresh-conversation creation and a manual-interjection refresh delta
   (user/branch families).
-- Confirm quiescence window bounds per model/profile.
+- Re-evaluate the 3 s quiescence bound if additional model/profile evidence
+  shows a materially different transport pause distribution.

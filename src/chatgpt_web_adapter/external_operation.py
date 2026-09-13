@@ -267,6 +267,22 @@ _TERMINAL_EVENT_TYPES: frozenset[str] = frozenset({"end_turn", "status_update", 
 _FAILURE_EVENT_TYPES: frozenset[str] = frozenset({"stream_failed", "observer_lost"})
 
 
+def _is_conversation_write(event: ExternalOperationEvent) -> bool:
+    return event.metadata.get("is_conversation_write") is True
+
+
+def _is_data_event(event: ExternalOperationEvent) -> bool:
+    return event.event_type in _DATA_EVENT_TYPES or (
+        event.event_type == "stream_data" and _is_conversation_write(event)
+    )
+
+
+def _is_terminal_event(event: ExternalOperationEvent) -> bool:
+    if event.event_type == "stream_finished" and _is_conversation_write(event):
+        return True
+    return event.event_type in _TERMINAL_EVENT_TYPES and event.status in {"completed", "failed"}
+
+
 class ExternalOperationStream:
     """Consumes content-free protocol-v2 frames for one operation.
 
@@ -291,7 +307,11 @@ class ExternalOperationStream:
         self._events: list[ExternalOperationEvent] = []
         self._terminal_seen = False
         self._failed = False
+        self._retryable = False
+        self._conversation_ref: str | None = None
+        self._identity_rebind_pending = False
         self._last_data_t_ms: int | None = None
+        self._last_terminal_t_ms: int | None = None
         self._last_t_ms: int | None = None
 
     def ingest(self, event: ExternalOperationEvent) -> None:
@@ -300,13 +320,39 @@ class ExternalOperationStream:
                 f"event operation {event.operation_id} does not match {self.operation_id}"
             )
         self._tracker.validate(self.operation_id, event.source, event.event_seq)
-        if event.error is not None:
+        if event.event_type == "runtime_reattach":
+            self._identity_rebind_pending = True
+        if event.conversation_ref is not None:
+            if self._conversation_ref is None:
+                self._conversation_ref = event.conversation_ref
+                self._identity_rebind_pending = False
+            elif event.conversation_ref != self._conversation_ref:
+                if not self._identity_rebind_pending:
+                    raise SourceIdentityDrift(
+                        f"conversation/source identity drift: {self._conversation_ref} -> {event.conversation_ref}"
+                    )
+                self._conversation_ref = event.conversation_ref
+                self._identity_rebind_pending = False
+            elif self._identity_rebind_pending:
+                self._identity_rebind_pending = False
+        if (
+            event.status == "retryable"
+            and event.error is not None
+            and event.error.get("retryable") is True
+            and event.event_type not in _FAILURE_EVENT_TYPES
+        ):
+            self._retryable = True
+        elif event.error is not None or event.event_type in _FAILURE_EVENT_TYPES:
             self._failed = True
-        if event.event_type in _FAILURE_EVENT_TYPES:
-            self._failed = True
-        if event.event_type in _TERMINAL_EVENT_TYPES and event.status in {"completed", "failed"}:
+        if event.event_type == "turn_submitted":
+            self._retryable = False
+            self._terminal_seen = False
+            self._last_data_t_ms = None
+            self._last_terminal_t_ms = None
+        if _is_terminal_event(event):
             self._terminal_seen = True
-        if event.event_type in _DATA_EVENT_TYPES:
+            self._last_terminal_t_ms = event.t_ms
+        if _is_data_event(event):
             self._last_data_t_ms = event.t_ms
         if self._last_t_ms is None or event.t_ms > self._last_t_ms:
             self._last_t_ms = event.t_ms
@@ -315,8 +361,14 @@ class ExternalOperationStream:
     def status(self) -> str:
         if self._failed:
             return "failed"
+        if self._retryable:
+            return "retryable"
         if self._terminal_seen:
-            anchor = self._last_data_t_ms if self._last_data_t_ms is not None else self._last_t_ms
+            anchors = [
+                value for value in (self._last_data_t_ms, self._last_terminal_t_ms)
+                if value is not None
+            ]
+            anchor = max(anchors) if anchors else self._last_t_ms
             if anchor is None:
                 return "completed"
             age = max(0.0, (self._now() * 1000.0) - float(anchor))
@@ -325,7 +377,7 @@ class ExternalOperationStream:
         return "running"
 
     def result(self) -> dict[str, Any]:
-        terminal_events = [e for e in self._events if e.event_type in _TERMINAL_EVENT_TYPES]
+        terminal_events = [e for e in self._events if _is_terminal_event(e)]
         metadata = terminal_events[-1].metadata if terminal_events else {}
         return {
             "operation_id": self.operation_id,
@@ -333,6 +385,7 @@ class ExternalOperationStream:
             "event_count": len(self._events),
             "terminal_markers": len(terminal_events),
             "failed": self._failed,
+            "retryable": self._retryable,
             "final_status": metadata.get("status"),
             "finish_reason": metadata.get("finish_reason"),
             "last_t_ms": self._last_t_ms,

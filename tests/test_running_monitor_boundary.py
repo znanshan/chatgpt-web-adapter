@@ -12,7 +12,7 @@ def _read(name: str) -> str:
 
 def test_entry_imports_running_monitor_between_recorder_and_observer() -> None:
     entry = _read("service_worker_entry_v3.js")
-    recorder_import = 'importScripts("service_worker_event_characterization_recorder.js")'
+    recorder_import = 'importScripts("service_worker_external_operation_v2_1.js")'
     monitor_import = 'importScripts("service_worker_running_monitor.js")'
     observer_import = 'importScripts("service_worker_persistent_turn_observer_v3.js")'
     assert recorder_import in entry

@@ -33,6 +33,10 @@ let _cwaCharEvents = [];
 let _cwaCharDomTimer = null;
 let _cwaCharDomSamples = 0;
 let _cwaCharPersistTimer = null;
+let _cwaCharAckCursor = null;
+let _cwaCharConversationRef = null;
+let _cwaCharAttemptId = null;
+let _cwaCharTurnId = null;
 let _cwaCharTabUpdatedListener = null;
 let _cwaCharTabActivatedListener = null;
 let _cwaCharTabRemovedListener = null;
@@ -97,23 +101,40 @@ function _cwaCharPush(entry) {
   _cwaCharSchedulePersist();
 }
 
+function _cwaCharPersistedLog() {
+  return {
+    schema: CWA_CHARACTERIZATION_SCHEMA,
+    session_id: _cwaCharSessionId,
+    active: _cwaCharActive,
+    started_at_ms: _cwaCharStartedAtMs,
+    event_count: _cwaCharEvents.length,
+    bytes: _cwaCharBytes,
+    acked_cursor: _cwaCharAckCursor,
+    conversation_ref: _cwaCharConversationRef,
+    attempt_id: _cwaCharAttemptId,
+    turn_id: _cwaCharTurnId,
+    events: _cwaCharEvents
+  };
+}
+
+async function _cwaCharPersistNow() {
+  if (_cwaCharPersistTimer !== null) {
+    try { clearTimeout(_cwaCharPersistTimer); } catch {}
+    _cwaCharPersistTimer = null;
+  }
+  try {
+    await chrome.storage.local.set({ [CWA_CHARACTERIZATION_KEY]: _cwaCharPersistedLog() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function _cwaCharSchedulePersist() {
   if (_cwaCharPersistTimer !== null) return;
-  _cwaCharPersistTimer = setTimeout(async () => {
+  _cwaCharPersistTimer = setTimeout(() => {
     _cwaCharPersistTimer = null;
-    try {
-      await chrome.storage.local.set({
-        [CWA_CHARACTERIZATION_KEY]: {
-          schema: CWA_CHARACTERIZATION_SCHEMA,
-          session_id: _cwaCharSessionId,
-          active: _cwaCharActive,
-          started_at_ms: _cwaCharStartedAtMs,
-          event_count: _cwaCharEvents.length,
-          bytes: _cwaCharBytes,
-          events: _cwaCharEvents
-        }
-      });
-    } catch {}
+    void _cwaCharPersistNow();
   }, 500);
 }
 
@@ -365,41 +386,136 @@ function _cwaCharOnTabUpdated(tabId, changeInfo, tab) {
   });
 }
 
-function _cwaCharStart(sessionId) {
-  if (_cwaCharActive) return { ok: false, error: "CHARACTERIZE_ALREADY_ACTIVE" };
+function _cwaCharPublicSource(rawSource) {
+  return rawSource === "dom" || rawSource === "tab" ? "page" : rawSource;
+}
+
+function _cwaCharHydrateStored(log) {
+  _cwaCharSessionId = log.session_id ?? null;
+  _cwaCharStartedAtMs = log.started_at_ms ?? _cwaCharNow();
+  _cwaCharEvents = Array.isArray(log.events) ? [...log.events] : [];
+  _cwaCharBytes = Number.isFinite(log.bytes) ? Number(log.bytes) : _cwaCharEvents.reduce((sum, entry) => sum + JSON.stringify(entry).length, 0);
+  _cwaCharAckCursor = typeof log.acked_cursor === "string" ? log.acked_cursor : null;
+  _cwaCharConversationRef = typeof log.conversation_ref === "string" ? log.conversation_ref : null;
+  _cwaCharAttemptId = typeof log.attempt_id === "string" ? log.attempt_id : null;
+  _cwaCharTurnId = typeof log.turn_id === "string" ? log.turn_id : null;
+  _cwaCharSeq = 0;
+  _cwaCharSourceSeq = new Map();
+  _cwaCharDomSamples = 0;
+  for (const entry of _cwaCharEvents) {
+    if (Number.isInteger(entry?.seq) && entry.seq >= _cwaCharSeq) _cwaCharSeq = entry.seq + 1;
+    const source = _cwaCharPublicSource(typeof entry?.source === "string" ? entry.source : "session");
+    if (Number.isInteger(entry?.source_seq)) {
+      const next = entry.source_seq + 1;
+      if (next > (_cwaCharSourceSeq.get(source) || 0)) _cwaCharSourceSeq.set(source, next);
+    }
+    if (entry?.source === "dom") _cwaCharDomSamples += 1;
+  }
+  _cwaCharWsKinds = new Map();
+}
+
+function _cwaCharNormalizeContext(context) {
+  const input = context && typeof context === "object" ? context : {};
+  const normalized = {};
+  for (const key of ["conversation_ref", "attempt_id", "turn_id"]) {
+    const value = input[key];
+    if (value === null || value === undefined) {
+      normalized[key] = null;
+    } else if (typeof value === "string" && value.trim()) {
+      normalized[key] = value.trim();
+    } else {
+      throw new Error("EXTERNAL_OPERATION_CONTEXT_INVALID");
+    }
+  }
+  return normalized;
+}
+
+function _cwaCharContextMatches(context) {
+  return (
+    (context.conversation_ref === null || context.conversation_ref === _cwaCharConversationRef) &&
+    (context.attempt_id === null || context.attempt_id === _cwaCharAttemptId) &&
+    (context.turn_id === null || context.turn_id === _cwaCharTurnId)
+  );
+}
+
+async function _cwaCharStart(sessionId, context = null) {
+  const normalizedSessionId = typeof sessionId === "string" && sessionId ? sessionId : null;
+  let normalizedContext;
+  try { normalizedContext = _cwaCharNormalizeContext(context); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  if (_cwaCharActive) {
+    if (_cwaCharSessionId === normalizedSessionId) {
+      if (!_cwaCharContextMatches(normalizedContext)) {
+        return { ok: false, error: "EXTERNAL_OPERATION_CONTEXT_MISMATCH" };
+      }
+      return { ok: true, session_id: _cwaCharSessionId, active: true, resumed: false, already_active: true };
+    }
+    return { ok: false, error: "CHARACTERIZE_ALREADY_ACTIVE" };
+  }
+
+  let storedLog = null;
+  try {
+    const stored = await chrome.storage.local.get(CWA_CHARACTERIZATION_KEY);
+    storedLog = stored?.[CWA_CHARACTERIZATION_KEY] || null;
+  } catch {}
+
+  if (storedLog?.active === true) {
+    if (storedLog.session_id !== normalizedSessionId) {
+      return { ok: false, error: "CHARACTERIZE_ALREADY_ACTIVE" };
+    }
+    _cwaCharHydrateStored(storedLog);
+    if (!_cwaCharContextMatches(normalizedContext)) {
+      return { ok: false, error: "EXTERNAL_OPERATION_CONTEXT_MISMATCH" };
+    }
+    _cwaCharActive = true;
+    _cwaCharActivateListeners();
+    _cwaCharPush({ source: "runtime", kind: "reattached" });
+    const durable = await _cwaCharPersistNow();
+    if (!durable) return { ok: false, error: "EXTERNAL_OPERATION_PERSIST_FAILED" };
+    return { ok: true, session_id: _cwaCharSessionId, active: true, resumed: true };
+  }
+
+  if (storedLog && storedLog.session_id === normalizedSessionId && storedLog.active === false) {
+    return { ok: false, error: "CHARACTERIZE_SESSION_ALREADY_STOPPED" };
+  }
+
   _cwaCharActive = true;
-  _cwaCharSessionId = sessionId || null;
+  _cwaCharSessionId = normalizedSessionId;
   _cwaCharStartedAtMs = _cwaCharNow();
   _cwaCharSeq = 0;
   _cwaCharSourceSeq = new Map();
   _cwaCharBytes = 0;
   _cwaCharEvents = [];
+  _cwaCharAckCursor = null;
+  _cwaCharConversationRef = normalizedContext.conversation_ref;
+  _cwaCharAttemptId = normalizedContext.attempt_id;
+  _cwaCharTurnId = normalizedContext.turn_id;
   _cwaCharDomSamples = 0;
   _cwaCharWsKinds = new Map();
+  _cwaCharActivateListeners();
+  _cwaCharPush({ source: "session", kind: "started" });
+  const durable = await _cwaCharPersistNow();
+  if (!durable) return { ok: false, error: "EXTERNAL_OPERATION_PERSIST_FAILED" };
+  return { ok: true, session_id: _cwaCharSessionId, active: true, resumed: false };
+}
 
+
+function _cwaCharActivateListeners() {
   chrome.debugger.onEvent.addListener(_cwaCharOnDebuggerEvent);
-
   _cwaCharTabUpdatedListener = _cwaCharOnTabUpdated;
   chrome.tabs.onUpdated.addListener(_cwaCharTabUpdatedListener);
-
   _cwaCharTabActivatedListener = (activeInfo) => {
     if (!_cwaCharActive) return;
     _cwaCharPush({ source: "tab", kind: "activated", tabId: activeInfo?.tabId ?? null });
   };
   chrome.tabs.onActivated.addListener(_cwaCharTabActivatedListener);
-
   _cwaCharTabRemovedListener = (tabId) => {
     if (!_cwaCharActive) return;
     _cwaCharPush({ source: "tab", kind: "removed", tabId });
   };
   chrome.tabs.onRemoved.addListener(_cwaCharTabRemovedListener);
-
   _cwaCharDomTimer = setInterval(() => { void _cwaCharDomProbeOnce(); }, CWA_CHARACTERIZATION_DOM_INTERVAL_MS);
-
-  _cwaCharPush({ source: "session", kind: "started" });
-  return { ok: true, session_id: _cwaCharSessionId };
 }
-
 async function _cwaCharStop() {
   if (!_cwaCharActive) return { ok: false, error: "CHARACTERIZE_NOT_ACTIVE" };
   _cwaCharActive = false;
@@ -432,19 +548,7 @@ async function _cwaCharStop() {
     started_at_ms: _cwaCharStartedAtMs,
     stopped_at_ms: _cwaCharNow()
   };
-  try {
-    await chrome.storage.local.set({
-      [CWA_CHARACTERIZATION_KEY]: {
-        schema: CWA_CHARACTERIZATION_SCHEMA,
-        session_id: _cwaCharSessionId,
-        active: false,
-        started_at_ms: _cwaCharStartedAtMs,
-        event_count: _cwaCharEvents.length,
-        bytes: _cwaCharBytes,
-        events: _cwaCharEvents
-      }
-    });
-  } catch {}
+  await _cwaCharPersistNow();
   return summary;
 }
 
@@ -489,6 +593,7 @@ function _cwaCharExternalSource(entry) {
 
 function _cwaCharExternalEventType(entry) {
   if (entry?.source === "session") return "session";
+  if (entry?.source === "runtime" && entry?.kind === "reattached") return "runtime_reattach";
   if (entry?.source === "dom") return "page_state";
   if (entry?.source === "tab") {
     return entry?.kind === "tab_updated" && typeof entry?.conversation_id === "string"
@@ -590,7 +695,7 @@ function _cwaCharParseExternalCursor(operationId, cursor) {
 
 async function _cwaCharExternalSnapshot(operationId) {
   if (_cwaCharSessionId === operationId && (_cwaCharActive || _cwaCharEvents.length > 0)) {
-    return { session_id: operationId, events: [..._cwaCharEvents] };
+    return { session_id: operationId, events: [..._cwaCharEvents], acked_cursor: _cwaCharAckCursor };
   }
   const stored = await chrome.storage.local.get(CWA_CHARACTERIZATION_KEY);
   const log = stored?.[CWA_CHARACTERIZATION_KEY];
@@ -602,7 +707,8 @@ async function _cwaCharExternalSnapshot(operationId) {
   }
   return {
     session_id: log.session_id,
-    events: Array.isArray(log.events) ? [...log.events] : []
+    events: Array.isArray(log.events) ? [...log.events] : [],
+    acked_cursor: typeof log.acked_cursor === "string" ? log.acked_cursor : null
   };
 }
 
@@ -618,9 +724,9 @@ function _cwaCharProjectExternalEvent(operationId, entry) {
     protocol: 2,
     type: "turn_event",
     operation_id: operationId,
-    conversation_ref: typeof entry?.conversation_id === "string" ? entry.conversation_id : null,
-    attempt_id: null,
-    turn_id: null,
+    conversation_ref: typeof entry?.conversation_id === "string" ? entry.conversation_id : _cwaCharConversationRef,
+    attempt_id: _cwaCharAttemptId,
+    turn_id: _cwaCharTurnId,
     event_seq: entry.source_seq,
     source: _cwaCharExternalSource(entry),
     event_type: eventType,
@@ -642,6 +748,10 @@ async function _cwaCharExternalOperationEvents(operationId, cursor, limit) {
     }
     const normalizedId = operationId.trim();
     const afterSeq = _cwaCharParseExternalCursor(normalizedId, cursor);
+    if (_cwaCharActive && _cwaCharSessionId === normalizedId) {
+      const durable = await _cwaCharPersistNow();
+      if (!durable) throw new Error("EXTERNAL_OPERATION_PERSIST_FAILED");
+    }
     const snapshot = await _cwaCharExternalSnapshot(normalizedId);
     const events = snapshot.events
       .filter((entry) => entry && Number.isInteger(entry.seq))
@@ -669,6 +779,119 @@ async function _cwaCharExternalOperationEvents(operationId, cursor, limit) {
   }
 }
 
+
+async function _cwaCharExternalOperationAck(operationId, cursor) {
+  try {
+    if (typeof operationId !== "string" || !operationId.trim()) throw new Error("EXTERNAL_OPERATION_ID_REQUIRED");
+    const normalizedId = operationId.trim();
+    const ackSeq = _cwaCharParseExternalCursor(normalizedId, cursor);
+    if (ackSeq < 0) throw new Error("EXTERNAL_OPERATION_ACK_CURSOR_REQUIRED");
+    if (_cwaCharActive && _cwaCharSessionId === normalizedId) {
+      const durable = await _cwaCharPersistNow();
+      if (!durable) throw new Error("EXTERNAL_OPERATION_PERSIST_FAILED");
+    }
+    const snapshot = await _cwaCharExternalSnapshot(normalizedId);
+    const known = snapshot.events.some((entry) => Number.isInteger(entry?.seq) && entry.seq === ackSeq);
+    if (!known) throw new Error("EXTERNAL_OPERATION_ACK_CURSOR_UNKNOWN");
+    if (typeof snapshot.acked_cursor === "string") {
+      const durableAckSeq = _cwaCharParseExternalCursor(normalizedId, snapshot.acked_cursor);
+      if (ackSeq < durableAckSeq) throw new Error("EXTERNAL_OPERATION_ACK_ROLLBACK");
+    }
+    if (_cwaCharSessionId === normalizedId && (_cwaCharActive || _cwaCharEvents.length > 0)) {
+      _cwaCharAckCursor = cursor;
+      const durable = await _cwaCharPersistNow();
+      if (!durable) throw new Error("EXTERNAL_OPERATION_PERSIST_FAILED");
+    } else {
+      const stored = await chrome.storage.local.get(CWA_CHARACTERIZATION_KEY);
+      const log = stored?.[CWA_CHARACTERIZATION_KEY];
+      if (!log || log.session_id !== normalizedId) throw new Error("EXTERNAL_OPERATION_NOT_FOUND");
+      await chrome.storage.local.set({ [CWA_CHARACTERIZATION_KEY]: { ...log, acked_cursor: cursor } });
+    }
+    return { ok: true, operation_id: normalizedId, cursor };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function _cwaCharExternalAggregate(operationId, entries, ackedCursor = null) {
+  const events = entries
+    .filter((entry) => entry && Number.isInteger(entry.seq))
+    .sort((left, right) => left.seq - right.seq)
+    .map((entry) => _cwaCharProjectExternalEvent(operationId, entry));
+  let failed = false;
+  let retryable = false;
+  let terminalSeen = false;
+  let terminalMarkers = 0;
+  let lastDataMs = null;
+  let lastTerminalMs = null;
+  let submittedSeen = false;
+  let conversationRef = null;
+  for (const event of events) {
+    if (typeof event.conversation_ref === "string") conversationRef = event.conversation_ref;
+    if (event.event_type === "turn_submitted") {
+      retryable = false;
+      submittedSeen = true;
+      terminalSeen = false;
+      terminalMarkers = 0;
+      lastDataMs = null;
+      lastTerminalMs = null;
+    }
+    if (event.status === "retryable" && event.error?.retryable === true) retryable = true;
+    if (event.status === "failed" || event.event_type === "stream_failed" || event.event_type === "observer_lost" || event.error?.retryable === false) failed = true;
+    const conversationWrite = event.metadata?.is_conversation_write === true;
+    const structuredTerminal = ["end_turn", "status_update", "metadata_update"].includes(event.event_type) && ["completed", "failed"].includes(event.status);
+    const transportTerminal = submittedSeen && event.event_type === "stream_finished" && conversationWrite;
+    if (structuredTerminal || transportTerminal) {
+      terminalSeen = true;
+      terminalMarkers += 1;
+      lastTerminalMs = event.t_ms;
+    }
+    const structuredData = ["text_delta", "content_update", "tool_call", "tool_result"].includes(event.event_type);
+    const transportData = submittedSeen && event.event_type === "stream_data" && conversationWrite;
+    if (structuredData || transportData) lastDataMs = event.t_ms;
+  }
+  let status = "running";
+  if (failed) status = "failed";
+  else if (retryable) status = "retryable";
+  else if (terminalSeen) {
+    const anchors = [lastDataMs, lastTerminalMs].filter((value) => value !== null);
+    const anchor = anchors.length > 0 ? Math.max(...anchors) : null;
+    if (anchor === null || _cwaCharNow() - anchor >= 3000) status = "completed";
+  }
+  return {
+    operation_id: operationId,
+    conversation_ref: conversationRef,
+    status,
+    event_count: events.length,
+    terminal_markers: terminalMarkers,
+    failed,
+    retryable,
+    cursor: events.length > 0 ? events[events.length - 1].cursor : null,
+    acked_cursor: ackedCursor,
+  };
+}
+
+async function _cwaCharExternalOperationStatus(operationId) {
+  try {
+    if (typeof operationId !== "string" || !operationId.trim()) throw new Error("EXTERNAL_OPERATION_ID_REQUIRED");
+    const normalizedId = operationId.trim();
+    if (_cwaCharActive && _cwaCharSessionId === normalizedId) {
+      const durable = await _cwaCharPersistNow();
+      if (!durable) throw new Error("EXTERNAL_OPERATION_PERSIST_FAILED");
+    }
+    const snapshot = await _cwaCharExternalSnapshot(normalizedId);
+    return { ok: true, ..._cwaCharExternalAggregate(normalizedId, snapshot.events, snapshot.acked_cursor ?? null) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function _cwaCharExternalOperationResult(operationId) {
+  const status = await _cwaCharExternalOperationStatus(operationId);
+  if (!status.ok) return status;
+  return { ...status };
+}
+
 async function _cwaCharClear() {
   try {
     await chrome.storage.local.remove(CWA_CHARACTERIZATION_KEY);
@@ -676,6 +899,10 @@ async function _cwaCharClear() {
     _cwaCharBytes = 0;
     _cwaCharSeq = 0;
     _cwaCharSourceSeq = new Map();
+    _cwaCharAckCursor = null;
+    _cwaCharConversationRef = null;
+    _cwaCharAttemptId = null;
+    _cwaCharTurnId = null;
     _cwaCharWsKinds.clear();
     return { ok: true };
   } catch (error) {
@@ -697,6 +924,21 @@ function _cwaCharStatus() {
 
 const _cwaCharPriorOnNativeMessage = onNativeMessage;
 onNativeMessage = async function _onNativeMessageWithCharacterizationRecorder(message, port) {
+  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_ack") {
+    const reply = await _cwaCharExternalOperationAck(message.operation_id, message.cursor);
+    safePortPost(port, { protocol: BRIDGE_PROTOCOL_VERSION, type: "external_operation_ack_result", request_id: message.request_id, ...reply });
+    return;
+  }
+  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_status") {
+    const reply = await _cwaCharExternalOperationStatus(message.operation_id);
+    safePortPost(port, { protocol: BRIDGE_PROTOCOL_VERSION, type: "external_operation_status_result", request_id: message.request_id, ...reply });
+    return;
+  }
+  if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_result") {
+    const reply = await _cwaCharExternalOperationResult(message.operation_id);
+    safePortPost(port, { protocol: BRIDGE_PROTOCOL_VERSION, type: "external_operation_result_result", request_id: message.request_id, ...reply });
+    return;
+  }
   if (message?.protocol === BRIDGE_PROTOCOL_VERSION && message?.type === "external_operation_events") {
     const reply = await _cwaCharExternalOperationEvents(
       message.operation_id,
@@ -716,8 +958,13 @@ onNativeMessage = async function _onNativeMessageWithCharacterizationRecorder(me
     const requestId = message.request_id;
     let reply;
     if (action === "start") {
-      reply = _cwaCharStart(
-        typeof message.session_id === "string" && message.session_id ? message.session_id : null
+      reply = await _cwaCharStart(
+        typeof message.session_id === "string" && message.session_id ? message.session_id : null,
+        {
+          conversation_ref: message.conversation_ref ?? null,
+          attempt_id: message.attempt_id ?? null,
+          turn_id: message.turn_id ?? null,
+        }
       );
     } else if (action === "stop") {
       const requestedSession = typeof message.session_id === "string" && message.session_id

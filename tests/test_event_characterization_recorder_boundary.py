@@ -12,7 +12,7 @@ def _read(name: str) -> str:
 
 def test_entry_imports_recorder_before_persistent_observer_kept_last() -> None:
     entry = _read("service_worker_entry_v3.js")
-    recorder_import = 'importScripts("service_worker_event_characterization_recorder.js")'
+    recorder_import = 'importScripts("service_worker_external_operation_v2_1.js")'
     observer_import = 'importScripts("service_worker_persistent_turn_observer_v3.js")'
     assert recorder_import in entry
     assert entry.index(recorder_import) < entry.index(observer_import)
@@ -21,7 +21,7 @@ def test_entry_imports_recorder_before_persistent_observer_kept_last() -> None:
 
 
 def test_recorder_is_inert_until_explicit_start() -> None:
-    worker = _read("service_worker_event_characterization_recorder.js")
+    worker = _read("service_worker_external_operation_v2_1.js")
     start_marker = "function _cwaCharStart("
     assert start_marker in worker
     # Every addListener call must live inside the explicit start function; the
@@ -32,7 +32,7 @@ def test_recorder_is_inert_until_explicit_start() -> None:
 
 
 def test_recorder_never_mutates_pages_or_reads_browserless_http() -> None:
-    worker = _read("service_worker_event_characterization_recorder.js")
+    worker = _read("service_worker_external_operation_v2_1.js")
     for forbidden in (
         "chrome.tabs.create(",
         "chrome.tabs.update(",
@@ -49,7 +49,7 @@ def test_recorder_never_mutates_pages_or_reads_browserless_http() -> None:
 
 
 def test_recorder_handles_characterize_native_message() -> None:
-    worker = _read("service_worker_event_characterization_recorder.js")
+    worker = _read("service_worker_external_operation_v2_1.js")
     assert 'message?.type === "characterize"' in worker
     for action in ("start", "stop", "dump", "clear", "status"):
         assert action in worker
@@ -58,7 +58,7 @@ def test_recorder_handles_characterize_native_message() -> None:
 
 
 def test_recorder_projects_private_evidence_to_public_v2_external_operation_frames() -> None:
-    worker = _read("service_worker_event_characterization_recorder.js")
+    worker = _read("service_worker_external_operation_v2_1.js")
     assert 'message?.type === "external_operation_events"' in worker
     assert 'type: "external_operation_events_result"' in worker
     assert "source_seq" in worker
@@ -72,8 +72,33 @@ def test_recorder_projects_private_evidence_to_public_v2_external_operation_fram
     assert "events: _cwaCharEvents" not in projection
 
 
+def test_external_operation_public_recovery_surface_is_durable_and_content_free() -> None:
+    worker = _read("service_worker_external_operation_v2_1.js")
+    for message_type in (
+        "external_operation_ack",
+        "external_operation_status",
+        "external_operation_result",
+    ):
+        assert f'message?.type === "{message_type}"' in worker
+    for symbol in (
+        "_cwaCharPersistNow",
+        "_cwaCharHydrateStored",
+        "runtime_reattach",
+        "acked_cursor",
+    ):
+        assert symbol in worker
+    # Public read is a durability boundary: active in-memory frames are flushed
+    # before a cursor is returned to a consumer.
+    read_body = worker[
+        worker.index("async function _cwaCharExternalOperationEvents"):
+        worker.index("async function _cwaCharExternalOperationAck")
+    ]
+    assert "await _cwaCharPersistNow()" in read_body
+    assert "chrome.storage.local" not in worker[worker.index("function _cwaCharProjectExternalEvent"):worker.index("async function _cwaCharExternalSnapshot")]
+
+
 def test_recorder_observes_websocket_frames_content_free() -> None:
-    worker = _read("service_worker_event_characterization_recorder.js")
+    worker = _read("service_worker_external_operation_v2_1.js")
     # The real-time conversation stream may ride a WebSocket instead of base64
     # SSE dataReceived chunks; the recorder must observe those frames too.
     for method in (
@@ -112,5 +137,17 @@ def test_worker_import_graph_is_closed_and_recorder_reachable() -> None:
     walk("service_worker_entry_v3.js", visited)
     # The recorder is in the reachable production graph and every import target
     # resolves, so a live extension reload cannot break the worker chain.
-    assert "service_worker_event_characterization_recorder.js" in visited
+    assert "service_worker_external_operation_v2_1.js" in visited
     assert "service_worker.js" in visited
+
+
+def test_external_operation_v2_uses_a_fresh_production_script_url() -> None:
+    entry = _read("service_worker_entry_v3.js")
+    production_name = "service_worker_external_operation_v2_1.js"
+    assert f'importScripts("{production_name}")' in entry
+    assert 'importScripts("service_worker_external_operation_v2.js")' not in entry
+    assert 'importScripts("service_worker_event_characterization_recorder.js")' not in entry
+    worker = _read(production_name)
+    assert 'message?.type === "external_operation_status"' in worker
+    assert "EXTERNAL_OPERATION_ACK_ROLLBACK" in worker
+    assert "runtime_reattach" in worker
