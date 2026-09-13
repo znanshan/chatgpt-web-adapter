@@ -618,7 +618,7 @@ async function executeOfficialPageTurn({ tabId, text, timeoutMs, onUiState = nul
   }
 }
 
-async function executeNativeTurn(message) {
+async function _baseExecuteNativeTurn(message) {
   const conversationId = typeof message.conversationId === "string" && message.conversationId.trim()
     ? message.conversationId.trim()
     : null;
@@ -718,7 +718,7 @@ async function onNativeMessage(message, port) {
 
   activeRequestId = requestId;
   try {
-    const result = await executeNativeTurn(message);
+    const result = await composedTurnExecutor(message);
     safePortPost(port, {
       protocol: BRIDGE_PROTOCOL_VERSION,
       type: "turn_result",
@@ -983,7 +983,7 @@ sendCommand = _patchedCoreSendCommand;
 
 const STALE_UI_COMPLETION_EVIDENCE_MAX_AGE_MS = 5_000;
 const STALE_UI_RELOAD_TIMEOUT_MS = 45_000;
-const _pr811OriginalExecuteNativeTurn = executeNativeTurn;
+const _pr811OriginalExecuteNativeTurn = _baseExecuteNativeTurn;
 
 // PR8.11.1 installs a per-turn promise here from the later response-stream
 // overlay. The core page turn snapshots the promise after submit observation.
@@ -1313,7 +1313,7 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithStaleUiRecovery(message) {
+const _productionTurnStage01 = async function _executeNativeTurnWithStaleUiRecovery(message) {
   const recovery = await _pr811MaybeRecoverStaleRuntimeUi(message);
   const result = await _pr811OriginalExecuteNativeTurn(message);
   return {
@@ -1339,7 +1339,7 @@ const PR88_PHASE_TIMING_STORAGE_KEY = "browserAuthorityLastPhaseTimingV1";
 
 const _pr88PhasePriorEnsureRuntimeTab = ensureRuntimeTab;
 const _pr88PhasePriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr88PhasePriorExecuteNativeTurn = executeNativeTurn;
+const _pr88PhasePriorExecuteNativeTurn = _productionTurnStage01;
 
 let _pr88PhaseTimingContext = null;
 
@@ -1508,7 +1508,7 @@ async function _pr88CharacterizePhaseTiming(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPhaseTiming(message) {
+const _productionTurnStage02 = async function _executeNativeTurnWithPhaseTiming(message) {
   if (message?.characterizeBrowserAuthorityPhaseTimingSupport === true) {
     if (_pr88PhaseTimingQueryConflict(message)) {
       throw new Error("PR8_8_PHASE_TIMING_SUPPORT_FLAG_CONFLICT");
@@ -1635,7 +1635,7 @@ const PR88_INSTANT_MODE_STORAGE_KEY = "browserAuthorityLastInstantModeV1";
 const PR88_INSTANT_PROBE_TIMEOUT_MS = 15_000;
 const PR88_INSTANT_MODE_SNAPSHOT_POLL_MS = 200;
 
-const _pr88InstantPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88InstantPriorExecuteNativeTurn = _productionTurnStage02;
 const _pr88InstantPriorExecuteOfficialPageTurn = executeOfficialPageTurn;
 const _pr88InstantPriorLocateAndFocusComposer = locateAndFocusComposer;
 const _pr88InstantPriorExtractSafeStreamMetadata = extractSafeStreamMetadata;
@@ -2207,7 +2207,7 @@ async function _pr88InstantCharacterizeSelectedMode(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithInstantModeObservation(message) {
+const _productionTurnStage03 = async function _executeNativeTurnWithInstantModeObservation(message) {
   if (message?.characterizeInstantModeSupport === true) {
     if (_pr88InstantQueryConflict(message) || message?.conversationId != null) {
       throw new Error("PR8_8_INSTANT_MODE_SUPPORT_FLAG_CONFLICT");
@@ -2415,7 +2415,7 @@ const PR88_INSTANT_SELECTION_OPTION_TIMEOUT_MS = 8000;
 const PR88_INSTANT_SELECTION_SETTLE_TIMEOUT_MS = 8000;
 const PR88_INSTANT_SELECTION_POLL_MS = 100;
 
-const _pr88SelectionPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88SelectionPriorExecuteNativeTurn = _productionTurnStage03;
 const _pr88SelectionPriorLocateAndFocusComposer = locateAndFocusComposer;
 
 let _pr88SelectionContext = null;
@@ -2866,7 +2866,7 @@ function _pr88SelectionRecord(context) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithInstantSelectionRepair(message) {
+const _productionTurnStage04 = async function _executeNativeTurnWithInstantSelectionRepair(message) {
   if (message?.characterizeInstantSelectionRepairSupport === true) {
     if (_pr88SelectionQueryConflict(message)) {
       throw new Error("PR8_8_INSTANT_SELECTION_SUPPORT_FLAG_CONFLICT");
@@ -2971,7 +2971,7 @@ const PR88_RETAINED_PICKER_FORENSICS_SCHEMA_VERSION = 1;
 const PR88_FORENSICS_MAX_DOM_CANDIDATES = 80;
 const PR88_FORENSICS_MAX_AX_CANDIDATES = 80;
 const PR88_FORENSICS_MAX_POPUPS = 24;
-const _pr88ForensicsPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88ForensicsPriorExecuteNativeTurn = _productionTurnStage04;
 
 function _pr88ForensicsConversationId(value) {
   const conversationId = typeof value === "string" ? value.trim() : "";
@@ -3402,7 +3402,7 @@ async function _pr88ForensicsProbe(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithRetainedPickerForensics(message) {
+const _productionTurnStage05 = async function _executeNativeTurnWithRetainedPickerForensics(message) {
   if (message?.characterizeRetainedPickerForensicsSupport === true) {
     if (_pr88ForensicsQueryConflict(message) || message?.conversationId != null) {
       throw new Error("PR8_8_RETAINED_PICKER_FORENSICS_SUPPORT_FLAG_CONFLICT");
@@ -3440,7 +3440,7 @@ executeNativeTurn = async function _executeNativeTurnWithRetainedPickerForensics
 // request, navigates/reloads a tab, or closes Browser Authority.
 
 const PR88_RETAINED_ROUTE_IDENTITY_SCHEMA_VERSION = 1;
-const _pr88RoutePriorExecuteNativeTurn = executeNativeTurn;
+const _pr88RoutePriorExecuteNativeTurn = _productionTurnStage05;
 
 function _pr88RouteConversationId(value) {
   const conversationId = typeof value === "string" ? value.trim() : "";
@@ -3586,7 +3586,7 @@ async function _pr88RetainedRouteIdentityProbe(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithRetainedRouteIdentity(message) {
+const _productionTurnStage06 = async function _executeNativeTurnWithRetainedRouteIdentity(message) {
   if (message?.characterizeRetainedRouteIdentitySupport === true) {
     if (_pr88RouteQueryConflict(message) || message?.conversationId != null) {
       throw new Error("PR8_8_RETAINED_ROUTE_IDENTITY_SUPPORT_FLAG_CONFLICT");
@@ -3618,7 +3618,7 @@ executeNativeTurn = async function _executeNativeTurnWithRetainedRouteIdentity(m
 /* BEGIN legacy source: service_worker_orphan_lease_reconciliation_pr8_8.js */
 // PR8.8 explicit zero-product-write orphan Browser Authority lease reconciliation.
 const PR88_ORPHAN_LEASE_SCHEMA = 1;
-const _pr88OrphanPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88OrphanPriorExecuteNativeTurn = _productionTurnStage06;
 
 function _pr88OrphanAssertReadOnly(message) {
   if (
@@ -3722,7 +3722,7 @@ async function _pr88ReconcileOrphanLease(message) {
   );
 }
 
-executeNativeTurn = async function _executeNativeTurnWithOrphanLeaseReconciliation(message) {
+const _productionTurnStage07 = async function _executeNativeTurnWithOrphanLeaseReconciliation(message) {
   if (message?.characterizeOrphanLeaseReconciliationSupport === true) return _pr88OrphanSupport(message);
   if (message?.reconcileOrphanedBrowserAuthorityLease === true) return _pr88ReconcileOrphanLease(message);
   return _pr88OrphanPriorExecuteNativeTurn(message);
@@ -3747,7 +3747,7 @@ const PR88_INSTANT_FAILURE_FORENSICS_SCHEMA_VERSION = 1;
 const PR88_INSTANT_FAILURE_FORENSICS_STORAGE_KEY =
   "browserAuthorityLastInstantFailureForensicsV1";
 
-const _pr88FailurePriorExecuteNativeTurn = executeNativeTurn;
+const _pr88FailurePriorExecuteNativeTurn = _productionTurnStage07;
 const _pr88FailurePriorLocateAndFocusComposer = locateAndFocusComposer;
 
 function _pr88FailureLeaseId(value) {
@@ -3970,7 +3970,7 @@ async function _pr88FailureRecord(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithInstantFailureForensics(message) {
+const _productionTurnStage08 = async function _executeNativeTurnWithInstantFailureForensics(message) {
   if (message?.characterizeInstantFailureForensicsSupport === true) {
     if (_pr88FailureQueryConflict(message) || message?.expectedBrowserAuthorityLeaseId != null) {
       throw new Error("PR8_8_INSTANT_FAILURE_FORENSICS_SUPPORT_FLAG_CONFLICT");
@@ -4019,7 +4019,7 @@ const PR88_INSTANT_POPUP_MAX_SURFACES = 8;
 const PR88_INSTANT_POPUP_MAX_MODE_LABELS = 16;
 const PR88_INSTANT_POPUP_MAX_ACTIONABLES = 32;
 
-const _pr88PopupPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88PopupPriorExecuteNativeTurn = _productionTurnStage08;
 const _pr88PopupPriorLocateAndFocusComposer = locateAndFocusComposer;
 
 function _pr88PopupLeaseId(value) {
@@ -4376,7 +4376,7 @@ function _pr88PopupPublicRecord(record) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithInstantPopupSubtreeForensics(message) {
+const _productionTurnStage09 = async function _executeNativeTurnWithInstantPopupSubtreeForensics(message) {
   if (message?.characterizeInstantFailureForensicsSupport === true) {
     const prior = await _pr88PopupPriorExecuteNativeTurn(message);
     return {
@@ -4430,7 +4430,7 @@ const PR88_PICKER_TRIGGER_TIMELINE_STORAGE_KEY =
   "browserAuthorityLastPickerTriggerTimelineV1";
 const PR88_PICKER_TRIGGER_MAX_SAMPLES = 96;
 
-const _pr88TriggerPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88TriggerPriorExecuteNativeTurn = _productionTurnStage09;
 const _pr88TriggerPriorSelectionPoint = _pr88SelectionPoint;
 const _pr88TriggerPriorRawClick = _pr88SelectionRawClick;
 const _pr88TriggerPriorLocateAndFocusComposer = locateAndFocusComposer;
@@ -5067,8 +5067,7 @@ async function _pr88TriggerStoredRecord() {
   }
 }
 
-executeNativeTurn =
-  async function _executeNativeTurnWithPickerTriggerTimeline(message) {
+const _productionTurnStage10 = async function _executeNativeTurnWithPickerTriggerTimeline(message) {
     const result = await _pr88TriggerPriorExecuteNativeTurn(message);
 
     if (message?.characterizeInstantFailureForensicsSupport === true) {
@@ -5351,7 +5350,7 @@ async function _pr88EffortEvaluate(debuggee, kind) {
 // Zero product writes. Optional UI navigation is limited to opening the quick
 // effort picker and opening Advanced; no slider/model/effort choice is clicked.
 
-const _pr88EffortPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88EffortPriorExecuteNativeTurn = _productionTurnStage10;
 
 function _pr88EffortConversationId(value) {
   const id = typeof value === "string" ? value.trim() : "";
@@ -5485,7 +5484,7 @@ async function _pr88EffortProbe(message) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithReasoningEffortSlider(message) {
+const _productionTurnStage11 = async function _executeNativeTurnWithReasoningEffortSlider(message) {
   if (message?.characterizeReasoningEffortSliderSupport === true) {
     if (_pr88EffortConflict(message)) throw new Error("PR8_8_REASONING_EFFORT_SUPPORT_FLAG_CONFLICT");
     return {
@@ -5516,7 +5515,7 @@ executeNativeTurn = async function _executeNativeTurnWithReasoningEffortSlider(m
 // and logical Advanced-control dealiasing. Strictly zero-click / zero-write.
 
 const PR88_REASONING_EFFORT_GEOMETRY_SCHEMA_VERSION = 1;
-const _pr88EffortGeometryPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88EffortGeometryPriorExecuteNativeTurn = _productionTurnStage11;
 
 function _pr88EffortGeometryConflict(message) {
   return (
@@ -5764,7 +5763,7 @@ async function _pr88EffortGeometryProbe(message) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithReasoningEffortGeometry(message) {
+const _productionTurnStage12 = async function _executeNativeTurnWithReasoningEffortGeometry(message) {
   if (message?.characterizeReasoningEffortGeometrySupport === true) {
     if (_pr88EffortGeometryConflict(message)) throw new Error("PR8_8_REASONING_EFFORT_GEOMETRY_SUPPORT_FLAG_CONFLICT");
     return {
@@ -6678,7 +6677,7 @@ _pr88SelectionEnsureInstant =
 // PR8.8 selection record enrichment and support RPC.
 
 const _pr88InstantEffortPriorSelectionRecord = _pr88SelectionRecord;
-const _pr88InstantEffortPriorExecuteNativeTurn = executeNativeTurn;
+const _pr88InstantEffortPriorExecuteNativeTurn = _productionTurnStage12;
 
 _pr88SelectionRecord = function _pr88SelectionRecordWithEffortSlider(context) {
   const base = _pr88InstantEffortPriorSelectionRecord(context);
@@ -6706,7 +6705,7 @@ _pr88SelectionRecord = function _pr88SelectionRecordWithEffortSlider(context) {
   };
 };
 
-executeNativeTurn = async function _executeNativeTurnWithInstantEffortSelectionSupport(message) {
+const _productionTurnStage13 = async function _executeNativeTurnWithInstantEffortSelectionSupport(message) {
   if (message?.characterizeInstantEffortSelectionSupport === true) {
     if (_pr88InstantEffortSupportConflict(message)) {
       throw new Error("PR8_8_INSTANT_EFFORT_SUPPORT_FLAG_CONFLICT");
@@ -6741,7 +6740,7 @@ const PR810_MODEL_PROFILE_STORAGE_KEY = "browserAuthorityLastModelProfileSelecti
 const PR810_MODEL_MODE_INDEX = Object.freeze({INSTANT: 0, MEDIUM: 1, HIGH: 2});
 const PR810_INITIAL_MODE_ACQUISITION_TIMEOUT_MS = 8000;
 
-const _pr810ModelProfilePriorExecuteNativeTurn = executeNativeTurn;
+const _pr810ModelProfilePriorExecuteNativeTurn = _productionTurnStage13;
 const _pr810ModelProfilePriorLocateAndFocusComposer = locateAndFocusComposer;
 let _pr810ModelProfileContext = null;
 
@@ -6981,7 +6980,7 @@ async function _pr810StoredRecord() {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithModelProfile(message) {
+const _productionTurnStage14 = async function _executeNativeTurnWithModelProfile(message) {
   if (message?.characterizeProductModelProfileSupport === true) {
     if (_pr810QueryConflict(message)) throw new Error("PR8_10_MODEL_PROFILE_SUPPORT_FLAG_CONFLICT");
     return {
@@ -7061,7 +7060,7 @@ const PR89_BROWSER_STREAM_MAX_OBSERVATIONS = 64;
 const PR89_BROWSER_STREAM_MAX_PREVIEW_CHARS = 160;
 const PR89_BROWSER_STREAM_MAX_SSE_BUFFER_CHARS = 262144;
 
-const _pr89BrowserStreamPriorExecuteNativeTurn = executeNativeTurn;
+const _pr89BrowserStreamPriorExecuteNativeTurn = _productionTurnStage14;
 const _pr89BrowserStreamPriorExecuteOfficialPageTurn = executeOfficialPageTurn;
 
 let _pr89BrowserStreamContext = null;
@@ -7480,7 +7479,7 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithSafeBrowser
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithSafeBrowserStream(message) {
+const _productionTurnStage15 = async function _executeNativeTurnWithSafeBrowserStream(message) {
   if (message?.characterizeSafeBrowserResponseStreamingSupport === true) {
     if (message?.text != null || message?.conversationId != null) {
       throw new Error("PR8_9_BROWSER_STREAM_SUPPORT_FLAG_CONFLICT");
@@ -7751,7 +7750,7 @@ _pr89BrowserStreamSafeResult =
 // material never leave the browser worker.
 
 const _pr89DeliveryPriorRecordAssistant = _pr89BrowserStreamRecordAssistant;
-const _pr89DeliveryPriorExecuteNativeTurn = executeNativeTurn;
+const _pr89DeliveryPriorExecuteNativeTurn = _productionTurnStage15;
 
 let _pr89DeliveryRequestId = null;
 
@@ -7812,7 +7811,7 @@ _pr89BrowserStreamRecordAssistant = async function _pr89RecordAssistantWithDeliv
   });
 };
 
-executeNativeTurn = async function _executeNativeTurnWithRevisionSafeTextDelivery(message) {
+const _productionTurnStage16 = async function _executeNativeTurnWithRevisionSafeTextDelivery(message) {
   if (message?.streamTextObservations !== true) {
     return _pr89DeliveryPriorExecuteNativeTurn(message);
   }
@@ -7855,7 +7854,7 @@ const PR811_TAIL_TIMING_STORAGE_KEY = "browserAuthorityLastPostAnswerTailTimingV
 
 const _pr811TailPriorRecordAssistant = _pr89BrowserStreamRecordAssistant;
 const _pr811TailPriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr811TailPriorExecuteNativeTurn = executeNativeTurn;
+const _pr811TailPriorExecuteNativeTurn = _productionTurnStage16;
 
 let _pr811TailContext = null;
 
@@ -7973,7 +7972,7 @@ async function _pr811StoredTailTimingRecord() {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPostAnswerTailTiming(message) {
+const _productionTurnStage17 = async function _executeNativeTurnWithPostAnswerTailTiming(message) {
   if (message?.characterizePostAnswerTailTimingSupport === true) {
     if (_pr811TailQueryConflict(message)) {
       throw new Error("PR8_11_TAIL_TIMING_SUPPORT_FLAG_CONFLICT");
@@ -8091,7 +8090,7 @@ const PR8111_COMPOSER_POLL_TIMEOUT_MS = 120000;
 const _pr8111PriorProcessSseEvent = _pr89BrowserStreamProcessSseEvent;
 const _pr8111PriorRecordAssistant = _pr89BrowserStreamRecordAssistant;
 const _pr8111PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr8111PriorExecuteNativeTurn = executeNativeTurn;
+const _pr8111PriorExecuteNativeTurn = _productionTurnStage17;
 
 let _pr8111Context = null;
 
@@ -8465,7 +8464,7 @@ function _pr8111Record(context) {
   };
 }
 
-executeNativeTurn = async function _pr8111ExecuteNativeTurn(message) {
+const _productionTurnStage18 = async function _pr8111ExecuteNativeTurn(message) {
   if (message?.characterizeEarlyProductCompletionSupport === true) {
     if (_pr8111QueryConflict(message)) {
       throw new Error("PR8_11_1_EARLY_COMPLETION_SUPPORT_FLAG_CONFLICT");
@@ -8573,7 +8572,7 @@ const _pr8111RepairPriorProcessSseEvent = _pr89BrowserStreamProcessSseEvent;
 const _pr8111RepairPriorRecordAssistant = _pr89BrowserStreamRecordAssistant;
 const _pr8111RepairPriorFirstTerminal = _pr8111FirstTerminal;
 const _pr8111RepairPriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr8111RepairPriorExecuteNativeTurn = executeNativeTurn;
+const _pr8111RepairPriorExecuteNativeTurn = _productionTurnStage18;
 
 let _pr8111RepairContext = null;
 
@@ -8708,7 +8707,7 @@ function _pr8111RepairLeaseId(value) {
   return leaseId || null;
 }
 
-executeNativeTurn = async function _pr8111RepairExecuteNativeTurn(message) {
+const _productionTurnStage19 = async function _pr8111RepairExecuteNativeTurn(message) {
   const leaseId = _pr8111RepairLeaseId(message?.browserAuthorityLeaseId);
   const ordinaryWrite = (
     typeof message?.text === "string" &&
@@ -8762,7 +8761,7 @@ const PR812_MAX_ACTIVITY_TEXT_CHARS = 12000;
 const PR812_MAX_OPERATION_DEPTH = 7;
 
 const _pr812PriorProcessSseEvent = _pr89BrowserStreamProcessSseEvent;
-const _pr812PriorExecuteNativeTurn = executeNativeTurn;
+const _pr812PriorExecuteNativeTurn = _productionTurnStage19;
 
 let _pr812RequestId = null;
 let _pr812Sequence = 0;
@@ -9202,7 +9201,7 @@ _pr89BrowserStreamProcessSseEvent = async function _pr812ProcessSseEvent(context
   return result;
 };
 
-executeNativeTurn = async function _pr812ExecuteNativeTurn(message) {
+const _productionTurnStage20 = async function _pr812ExecuteNativeTurn(message) {
   const streaming = message?.streamTextObservations === true;
   if (!streaming) return _pr812PriorExecuteNativeTurn(message);
 
@@ -9357,7 +9356,7 @@ _pr89BrowserStreamRecordAssistant = async function _pr812RecordAssistantWithChan
 
 const PR813_TEMPORARY_RUNTIME_TAB_KEY = "browserNativeTemporaryRuntimeTabIdV1";
 const PR813_TEMPORARY_PROOF_TIMEOUT_MS = 10_000;
-const _pr813PriorExecuteNativeTurn = executeNativeTurn;
+const _pr813PriorExecuteNativeTurn = _productionTurnStage20;
 const _pr813PriorEnsureRuntimeTab = ensureRuntimeTab;
 const _pr813PriorSubmitOfficialPageTurn = submitOfficialPageTurn;
 
@@ -9714,7 +9713,7 @@ async function _pr813ExecuteTemporaryTurn(message) {
   }
 }
 
-executeNativeTurn = async function _pr813ExecuteNativeTurn(message) {
+const _productionTurnStage21 = async function _pr813ExecuteNativeTurn(message) {
   if (message?.endTemporaryLifecycle === true) {
     return _pr813EndTemporaryLifecycle(message);
   }
@@ -9862,7 +9861,7 @@ executeOfficialPageTurn = async function _pr813ExecuteOfficialPageTurnWithSessio
 
 const PR813_FRESH_TEMPORARY_IDENTITY_SENTINEL = "__cwa_pr813_live_temporary_identity_pending__";
 const _pr813FreshIdentityPriorConversationId = _pr813ConversationId;
-const _pr813FreshIdentityPriorExecuteNativeTurn = executeNativeTurn;
+const _pr813FreshIdentityPriorExecuteNativeTurn = _productionTurnStage21;
 
 function _pr813FreshIdentityFromLiveContext() {
   const active = _pr813TemporaryTurnContext;
@@ -9884,7 +9883,7 @@ _pr813ConversationId = function _pr813ConversationIdWithFreshIdentitySentinel(va
   return _pr813FreshIdentityPriorConversationId(value);
 };
 
-executeNativeTurn = async function _pr813ExecuteNativeTurnWithFreshIdentityFlush(message) {
+const _productionTurnStage22 = async function _pr813ExecuteNativeTurnWithFreshIdentityFlush(message) {
   const mode = typeof message?.conversationMode === "string"
     ? message.conversationMode.trim().toLowerCase()
     : "normal";
@@ -9943,7 +9942,7 @@ const PR8132_FRESH_READINESS_REQUIRED_SAMPLES = 3;
 const _pr8132PriorSubmitOfficialPageTurn = submitOfficialPageTurn;
 const _pr8132PriorResolveProof = _pr813ResolveProof;
 const _pr8132PriorRejectProof = _pr813RejectProof;
-const _pr8132PriorExecuteNativeTurn = executeNativeTurn;
+const _pr8132PriorExecuteNativeTurn = _productionTurnStage22;
 
 const _pr8132TurnDiagnostics = new Map();
 
@@ -10194,7 +10193,7 @@ function _pr8132AbortError(error, diagnostic) {
   );
 }
 
-executeNativeTurn = async function _pr8132ExecuteNativeTurnWithStartupDiagnostics(message) {
+const _productionTurnStage23 = async function _pr8132ExecuteNativeTurnWithStartupDiagnostics(message) {
   const mode = typeof message?.conversationMode === "string"
     ? message.conversationMode.trim().toLowerCase()
     : "normal";
@@ -10238,7 +10237,7 @@ executeNativeTurn = async function _pr8132ExecuteNativeTurnWithStartupDiagnostic
 
 /* END legacy source: service_worker_temporary_startup_readiness_pr8_13_2.js */
 
-const _pr824aOriginalExecuteNativeTurn = executeNativeTurn;
+const _pr824aOriginalExecuteNativeTurn = _productionTurnStage23;
 
 async function _pr824aExistingRuntimeTabSnapshot() {
   const storedId = await storedRuntimeTabId();
@@ -10256,7 +10255,7 @@ async function _pr824aExistingRuntimeTabSnapshot() {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithProvisioningObservability(message) {
+const _productionTurnStage24 = async function _executeNativeTurnWithProvisioningObservability(message) {
   const before = await _pr824aExistingRuntimeTabSnapshot();
   const activatedTabIds = new Set();
   const onActivated = (activeInfo) => {
@@ -10406,7 +10405,7 @@ _pr824a3PublishValidatedRuntimeState().catch(() => {});
 const PR88_BROWSER_AUTHORITY_LEASE_KEY = "browserNativeRuntimeTabAuthorityLeaseId";
 const PR88_RESOURCE_SAMPLE_MIN_MS = 1000;
 const PR88_RESOURCE_SAMPLE_MAX_MS = 15000;
-const _pr88PriorExecuteNativeTurn = executeNativeTurn;
+const _pr88PriorExecuteNativeTurn = _productionTurnStage24;
 
 function _pr88LeaseId(value) {
   const leaseId = typeof value === "string" ? value.trim() : "";
@@ -10601,7 +10600,7 @@ async function _pr88SampleRuntimeTabResources(message) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithBrowserAuthorityLease(message) {
+const _productionTurnStage25 = async function _executeNativeTurnWithBrowserAuthorityLease(message) {
   if (message?.characterizeBrowserAuthorityStatus === true) {
     return _pr88CharacterizationStatus(message);
   }
@@ -10708,7 +10707,7 @@ async function _pr88ReleaseRuntimeTab(message) {
 const PR87_TEMPORARY_PROBE_DEFAULT_TIMEOUT_MS = 30_000;
 const PR87_TEMPORARY_PROBE_MAX_TIMEOUT_MS = 120_000;
 const PR87_TEMPORARY_SELECTION_TIMEOUT_MS = 5_000;
-const _pr87OriginalExecuteNativeTurn = executeNativeTurn;
+const _pr87OriginalExecuteNativeTurn = _productionTurnStage25;
 
 function _pr87ClampProbeTimeoutMs(value) {
   if (!Number.isFinite(value)) return PR87_TEMPORARY_PROBE_DEFAULT_TIMEOUT_MS;
@@ -10980,7 +10979,7 @@ async function _pr87ExecuteTemporaryModeProbe(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithTemporaryModeProbe(message) {
+const _productionTurnStage26 = async function _executeNativeTurnWithTemporaryModeProbe(message) {
   if (message?.probeTemporaryMode !== true) {
     return _pr87OriginalExecuteNativeTurn(message);
   }
@@ -11121,8 +11120,8 @@ _pr87TemporaryControlSnapshotExpression = function _pr87TemporaryControlSnapshot
 
 // Add the newly observed safe structural state signal to probe results without
 // changing normal production turn behavior.
-const _pr87PriorExecuteNativeTurnStateSemantics = executeNativeTurn;
-executeNativeTurn = async function _executeNativeTurnWithTemporaryStateSignalResult(message) {
+const _pr87PriorExecuteNativeTurnStateSemantics = _productionTurnStage26;
+const _productionTurnStage27 = async function _executeNativeTurnWithTemporaryStateSignalResult(message) {
   const result = await _pr87PriorExecuteNativeTurnStateSemantics(message);
   if (message?.probeTemporaryMode !== true || !result || typeof result !== "object") {
     return result;
@@ -11320,8 +11319,8 @@ _pr87TemporaryControlSnapshot = async function _pr87TemporaryControlSnapshotWith
   };
 };
 
-const _pr87AxPriorExecuteNativeTurn = executeNativeTurn;
-executeNativeTurn = async function _executeNativeTurnWithTemporaryAXEvidence(message) {
+const _pr87AxPriorExecuteNativeTurn = _productionTurnStage27;
+const _productionTurnStage28 = async function _executeNativeTurnWithTemporaryAXEvidence(message) {
   if (message?.probeTemporaryMode !== true) {
     return _pr87AxPriorExecuteNativeTurn(message);
   }
@@ -11576,7 +11575,7 @@ _pr87TemporaryControlSnapshot = async function _pr87TemporaryControlSnapshotWith
 
 const PR87_TEMPORARY_TURN_PROBE_DEFAULT_TIMEOUT_MS = 150_000;
 const PR87_TEMPORARY_TURN_PROBE_MAX_TIMEOUT_MS = 300_000;
-const _pr87TurnProbePriorExecuteNativeTurn = executeNativeTurn;
+const _pr87TurnProbePriorExecuteNativeTurn = _productionTurnStage28;
 
 function _pr87ClampTurnProbeTimeoutMs(value) {
   if (!Number.isFinite(value)) return PR87_TEMPORARY_TURN_PROBE_DEFAULT_TIMEOUT_MS;
@@ -11847,7 +11846,7 @@ async function _pr87TurnProbeExecute(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithTemporaryTurnCharacterization(message) {
+const _productionTurnStage29 = async function _executeNativeTurnWithTemporaryTurnCharacterization(message) {
   if (message?.characterizeTemporaryTurn !== true) {
     return _pr87TurnProbePriorExecuteNativeTurn(message);
   }
@@ -11877,7 +11876,7 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryTurnCharacteri
 // a full settling window completes. If readiness is not proven, the result is
 // explicitly INCONCLUSIVE rather than a negative history claim.
 
-const _pr87HistoryProbePriorExecuteNativeTurn = executeNativeTurn;
+const _pr87HistoryProbePriorExecuteNativeTurn = _productionTurnStage29;
 const PR87_HISTORY_DEFAULT_TIMEOUT_MS = 30_000;
 const PR87_HISTORY_MIN_SETTLE_MS = 8_000;
 const PR87_HISTORY_MAX_SETTLE_MS = 15_000;
@@ -12141,7 +12140,7 @@ async function _pr87ProbeHistoryPresence(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithTemporaryHistoryCharacterization(message) {
+const _productionTurnStage30 = async function _executeNativeTurnWithTemporaryHistoryCharacterization(message) {
   if (message?.probeTemporaryHistoryPresence !== true) {
     return _pr87HistoryProbePriorExecuteNativeTurn(message);
   }
@@ -12165,7 +12164,7 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryHistoryCharact
 // source tab open. It performs no canonical read and no history probe itself so
 // later experiments can observe history BEFORE any direct-id readback.
 
-const _pr87ManualPriorExecuteNativeTurn = executeNativeTurn;
+const _pr87ManualPriorExecuteNativeTurn = _productionTurnStage30;
 const PR87_MANUAL_DEFAULT_TIMEOUT_MS = 150_000;
 const PR87_MANUAL_MAX_TIMEOUT_MS = 300_000;
 
@@ -12547,7 +12546,7 @@ async function _pr87ManualGroundTruthTurn(message) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithManualTemporaryGroundTruth(message) {
+const _productionTurnStage31 = async function _executeNativeTurnWithManualTemporaryGroundTruth(message) {
   if (message?.characterizeManualTemporaryGroundTruth !== true) {
     return _pr87ManualPriorExecuteNativeTurn(message);
   }
@@ -12573,7 +12572,7 @@ executeNativeTurn = async function _executeNativeTurnWithManualTemporaryGroundTr
 // A single transient /c/<id> URL is not stable reopenability. Recovery evidence
 // requires visible conversation turns while the exact target route is observed.
 
-const _pr87RouteReopenPriorExecuteNativeTurn = executeNativeTurn;
+const _pr87RouteReopenPriorExecuteNativeTurn = _productionTurnStage31;
 const PR87_ROUTE_REOPEN_DEFAULT_TIMEOUT_MS = 30_000;
 const PR87_ROUTE_REOPEN_MAX_OBSERVATION_MS = 15_000;
 const PR87_ROUTE_REOPEN_SAMPLE_MS = 250;
@@ -12902,7 +12901,7 @@ async function _pr87ProbeTemporaryRouteReopen(message) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithTemporaryRouteReopenProbe(message) {
+const _productionTurnStage32 = async function _executeNativeTurnWithTemporaryRouteReopenProbe(message) {
   if (message?.probeTemporaryRouteReopen !== true) {
     return _pr87RouteReopenPriorExecuteNativeTurn(message);
   }
@@ -12924,7 +12923,7 @@ executeNativeTurn = async function _executeNativeTurnWithTemporaryRouteReopenPro
 // chain. The official page therefore remains responsible for upload semantics,
 // Sentinel/proof handling, request construction, and the protected write.
 
-const _pr92RichInputPriorExecuteNativeTurn = executeNativeTurn;
+const _pr92RichInputPriorExecuteNativeTurn = _productionTurnStage32;
 const _pr92PriorMaybeRecoverStaleRuntimeUi = (
   typeof _pr811MaybeRecoverStaleRuntimeUi === "function"
     ? _pr811MaybeRecoverStaleRuntimeUi
@@ -13384,7 +13383,7 @@ if (_pr92PriorMaybeRecoverStaleRuntimeUi) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92RichInput(message) {
+const _productionTurnStage33 = async function _executeNativeTurnWithPr92RichInput(message) {
   if (message?.characterizeRichInputSupport === true) {
     if (message?.text != null || message?.attachmentPaths != null) {
       throw new Error("PR9_2_RICH_INPUT_SUPPORT_PROBE_MUST_BE_NO_WRITE");
@@ -13512,7 +13511,7 @@ const _pr92DeadlineRepairPriorSubmitOfficialPageTurn = submitOfficialPageTurn;
 const _pr92DeadlineRepairPriorTryClearDirtyAttachmentFence = (
   _pr92TryClearDirtyAttachmentFence
 );
-const _pr92DeadlineRepairPriorExecuteNativeTurn = executeNativeTurn;
+const _pr92DeadlineRepairPriorExecuteNativeTurn = _productionTurnStage33;
 const PR92_DEADLINE_REPAIR_SCHEMA = 4;
 
 function _pr92DeadlineRepairTimeoutError(stage) {
@@ -13844,7 +13843,7 @@ _pr92TryClearDirtyAttachmentFence = async function _pr92ClearFenceWithinDeadline
 // Advance the no-write support contract so an installed pre-repair overlay cannot
 // satisfy the authenticated live gate merely because ordinary writes do not hit
 // the deadline edge cases during that run.
-executeNativeTurn = async function _executeNativeTurnWithPr92DeadlineRepair(message) {
+const _productionTurnStage34 = async function _executeNativeTurnWithPr92DeadlineRepair(message) {
   const result = await _pr92DeadlineRepairPriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -13881,7 +13880,7 @@ const _pr92ClosurePriorStageOfficialPageAttachments = _pr92StageOfficialPageAtta
 const _pr92ClosurePriorClickSendButton = clickSendButton;
 const _pr92ClosurePriorSubmitWithEnter = submitWithEnter;
 const _pr92ClosurePriorSubmitOfficialPageTurn = submitOfficialPageTurn;
-const _pr92ClosurePriorExecuteNativeTurn = executeNativeTurn;
+const _pr92ClosurePriorExecuteNativeTurn = _productionTurnStage34;
 const PR92_CLOSURE_REPAIR_SCHEMA = 6;
 const PR92_PAGE_ATTACHMENT_EVIDENCE_SOURCE = "PAGE_OWNED_COMPOSER_ATTACHMENT_STATE";
 const PR92_PAGE_ATTACHMENT_STABLE_POLLS = 2;
@@ -14203,7 +14202,7 @@ submitOfficialPageTurn = async function _pr92ClosurePageDeadlineGuardedSubmit(
   return { strategy: "page_deadline_guarded_send_button_click", selector };
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92ClosureRepair(message) {
+const _productionTurnStage35 = async function _executeNativeTurnWithPr92ClosureRepair(message) {
   const result = await _pr92ClosurePriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport === true) {
     return {
@@ -14267,7 +14266,7 @@ const _pr92Schema7PriorPersistDirtyAttachmentFence = _pr92PersistDirtyAttachment
 const _pr92Schema7PriorTryClearDirtyAttachmentFence = _pr92TryClearDirtyAttachmentFence;
 const _pr92Schema7PriorClearOfficialPageAttachments = _pr92ClearOfficialPageAttachments;
 const _pr92Schema7PriorSubmitOfficialPageTurn = submitOfficialPageTurn;
-const _pr92Schema7PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema7PriorExecuteNativeTurn = _productionTurnStage35;
 
 const PR92_SCHEMA7_REPAIR_SCHEMA = 7;
 const PR92_SCHEMA7_SESSION_IDENTITY_KEY = "pr92DirtyAttachmentSessionIdentityV1";
@@ -14599,7 +14598,7 @@ submitOfficialPageTurn = async function _pr92Schema7AtomicAttachmentSubmit(
   };
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema7Repair(message) {
+const _productionTurnStage36 = async function _executeNativeTurnWithPr92Schema7Repair(message) {
   const result = await _pr92Schema7PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -14634,7 +14633,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema7Repair(messa
 //      proof is being assembled.
 
 const _pr92Schema8PriorStageOfficialPageAttachments = _pr92StageOfficialPageAttachments;
-const _pr92Schema8PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema8PriorExecuteNativeTurn = _productionTurnStage36;
 
 const PR92_SCHEMA8_REPAIR_SCHEMA = 8;
 const PR92_SCHEMA8_PRESTAGE_CLEAN_STABLE_POLLS = 2;
@@ -14944,7 +14943,7 @@ _pr92ClearOfficialPageAttachments = async function _pr92Schema8ClearFencedRuntim
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema8Repair(message) {
+const _productionTurnStage37 = async function _executeNativeTurnWithPr92Schema8Repair(message) {
   const result = await _pr92Schema8PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -14970,7 +14969,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema8Repair(messa
 // Schema 9 requires every non-empty evidence channel to be exact, so no observed
 // extra/partial attachment evidence can be hidden by another channel.
 
-const _pr92Schema9PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema9PriorExecuteNativeTurn = _productionTurnStage37;
 const PR92_SCHEMA9_REPAIR_SCHEMA = 9;
 
 function _pr92Schema9AttachmentEvidenceExpression(expectedNames) {
@@ -15077,7 +15076,7 @@ function _pr92Schema9AttachmentEvidenceExpression(expectedNames) {
 // post-stage stable evidence, and schema 7's synchronous atomic final validator.
 _pr92ClosureAttachmentEvidenceExpression = _pr92Schema9AttachmentEvidenceExpression;
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema9Repair(message) {
+const _productionTurnStage38 = async function _executeNativeTurnWithPr92Schema9Repair(message) {
   const result = await _pr92Schema9PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -15101,7 +15100,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema9Repair(messa
 //   3. pre-stage debugger attach/Runtime.enable are bounded by the one outer rich
 //      turn deadline, and a late attach completion is followed by best-effort detach.
 
-const _pr92Schema10PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema10PriorExecuteNativeTurn = _productionTurnStage38;
 const PR92_SCHEMA10_REPAIR_SCHEMA = 10;
 const PR92_SCHEMA10_PRESTAGE_CLEAN_STABLE_POLLS = 2;
 
@@ -15312,7 +15311,7 @@ _pr92StageOfficialPageAttachments = async function _pr92Schema10StageFromOfficia
   return _pr92Schema8PriorStageOfficialPageAttachments(tabId, attachmentPaths, context);
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema10Repair(message) {
+const _productionTurnStage39 = async function _executeNativeTurnWithPr92Schema10Repair(message) {
   const result = await _pr92Schema10PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -15339,7 +15338,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema10Repair(mess
 //   2. every page-owned attachment evidence read is raced against the one outer
 //      rich-turn deadline instead of awaiting a raw Runtime.evaluate indefinitely.
 
-const _pr92Schema11PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema11PriorExecuteNativeTurn = _productionTurnStage39;
 const _pr92Schema11PriorReadPageOwnedAttachmentEvidence =
   _pr92ClosureReadPageOwnedAttachmentEvidence;
 const PR92_SCHEMA11_REPAIR_SCHEMA = 11;
@@ -15484,7 +15483,7 @@ _pr92ClosureReadPageOwnedAttachmentEvidence = async function _pr92Schema11ReadPa
   );
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema11Repair(message) {
+const _productionTurnStage40 = async function _executeNativeTurnWithPr92Schema11Repair(message) {
   const result = await _pr92Schema11PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -15509,7 +15508,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema11Repair(mess
 //   2. the complete Send-readiness wait is bounded by that same outer deadline,
 //      including any stalled Runtime.evaluate inside querySendButtonPoint.
 
-const _pr92Schema12PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema12PriorExecuteNativeTurn = _productionTurnStage40;
 const _pr92Schema12PriorWaitForSendButtonPoint = waitForSendButtonPoint;
 const PR92_SCHEMA12_REPAIR_SCHEMA = 12;
 
@@ -15642,7 +15641,7 @@ waitForSendButtonPoint = async function _pr92Schema12DeadlineBoundedSendReadines
   );
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema12Repair(message) {
+const _productionTurnStage41 = async function _executeNativeTurnWithPr92Schema12Repair(message) {
   const result = await _pr92Schema12PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -15668,7 +15667,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema12Repair(mess
 // if its acknowledgement loses the deadline race, the turn fails closed and
 // the fence remains authoritative for the next prewrite cleanup.
 
-const _pr92Schema13PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema13PriorExecuteNativeTurn = _productionTurnStage41;
 const PR92_SCHEMA13_REPAIR_SCHEMA = 13;
 
 function _pr92Schema13BestEffortDetach(debuggee) {
@@ -15943,7 +15942,7 @@ _pr92StageOfficialPageAttachments = async function _pr92Schema13FullyBoundedStag
   );
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema13Repair(message) {
+const _productionTurnStage42 = async function _executeNativeTurnWithPr92Schema13Repair(message) {
   const result = await _pr92Schema13PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -15976,7 +15975,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema13Repair(mess
 // combination closed before staging or write rather than widening PR8.10 inside
 // PR9.2. Text-only model-profile turns and ordinary rich-input turns are unchanged.
 
-const _pr92Schema14PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema14PriorExecuteNativeTurn = _productionTurnStage42;
 const PR92_SCHEMA14_REPAIR_SCHEMA = 14;
 
 function _pr92Schema14HasAttachmentPaths(message) {
@@ -15987,7 +15986,7 @@ function _pr92Schema14HasModelProfileRequirement(message) {
   return typeof message?.requiredModelMode === "string" && Boolean(message.requiredModelMode.trim());
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema14CompositionGuard(message) {
+const _productionTurnStage43 = async function _executeNativeTurnWithPr92Schema14CompositionGuard(message) {
   if (
     message?.characterizeRichInputSupport !== true &&
     _pr92Schema14HasAttachmentPaths(message) &&
@@ -16026,7 +16025,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema14Composition
 // phase may attach. Error/timeout paths retain the reviewed best-effort detach
 // semantics and cannot extend or rewrite the already reported failure outcome.
 
-const _pr92Schema15PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema15PriorExecuteNativeTurn = _productionTurnStage43;
 const PR92_SCHEMA15_REPAIR_SCHEMA = 15;
 
 async function _pr92Schema15DetachWithinDeadline(debuggee, context, stage) {
@@ -16196,7 +16195,7 @@ _pr92Schema12ObservePostStageAttachmentEvidence = async function _pr92Schema15Ob
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema15Repair(message) {
+const _productionTurnStage44 = async function _executeNativeTurnWithPr92Schema15Repair(message) {
   const result = await _pr92Schema15PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -16227,7 +16226,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema15Repair(mess
 
 const _pr92Schema16PriorEnsureRuntimeTab = ensureRuntimeTab;
 const _pr92Schema16PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr92Schema16PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema16PriorExecuteNativeTurn = _productionTurnStage44;
 const PR92_SCHEMA16_REPAIR_SCHEMA = 16;
 
 _pr92ReadDirtyAttachmentFence = async function _pr92Schema16ReadDirtyAttachmentFenceWithinDeadline() {
@@ -16472,7 +16471,7 @@ executeOfficialPageTurn = async function _pr92Schema16ExecuteOfficialPageTurnWit
   });
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema16Repair(message) {
+const _productionTurnStage45 = async function _executeNativeTurnWithPr92Schema16Repair(message) {
   const result = await _pr92Schema16PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -16503,7 +16502,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema16Repair(mess
 //      the already-submitted outcome.
 
 const _pr92Schema17PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr92Schema17PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema17PriorExecuteNativeTurn = _productionTurnStage45;
 const PR92_SCHEMA17_REPAIR_SCHEMA = 17;
 const PR92_SCHEMA17_OPTIONAL_POSTWRITE_CAP_MS = 1_000;
 const PR92_SCHEMA17_RPC_RETURN_RESERVE_MS = 500;
@@ -16854,7 +16853,7 @@ executeOfficialPageTurn = async function _pr92Schema17ExecuteOfficialPageTurnWit
   });
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema17Repair(message) {
+const _productionTurnStage46 = async function _executeNativeTurnWithPr92Schema17Repair(message) {
   const result = await _pr92Schema17PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -16896,7 +16895,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema17Repair(mess
 // than WRITE_OUTCOME_UNKNOWN. No write retry or second submit path is added.
 
 const _pr92Schema18PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr92Schema18PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema18PriorExecuteNativeTurn = _productionTurnStage46;
 const PR92_SCHEMA18_REPAIR_SCHEMA = 18;
 const PR92_SCHEMA18_IDENTITY_RESERVE_MS = 2_500;
 const PR92_SCHEMA18_RPC_RETURN_RESERVE_MS = 500;
@@ -17053,7 +17052,7 @@ executeOfficialPageTurn = async function _pr92Schema18ExecuteOfficialPageTurnWit
   };
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema18Repair(message) {
+const _productionTurnStage47 = async function _executeNativeTurnWithPr92Schema18Repair(message) {
   let result;
   try {
     result = await _pr92Schema18PriorExecuteNativeTurn(message);
@@ -17104,7 +17103,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema18Repair(mess
 const _pr92Schema19PriorCreateTurnContext = _pr92CreateTurnContext;
 const _pr92Schema19PriorExtractSafeStreamMetadata = extractSafeStreamMetadata;
 const _pr92Schema19PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr92Schema19PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema19PriorExecuteNativeTurn = _productionTurnStage47;
 const _pr92Schema19PriorOptionalPostWrite = _pr92Schema17OptionalPostWrite;
 const PR92_SCHEMA19_REPAIR_SCHEMA = 19;
 const PR92_SCHEMA19_CAUSAL_RESPONSE_BODY_CAP_MS = 2_000;
@@ -17239,7 +17238,7 @@ executeOfficialPageTurn = async function _pr92Schema19ExecuteOfficialPageTurnWit
   };
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema19Repair(message) {
+const _productionTurnStage48 = async function _executeNativeTurnWithPr92Schema19Repair(message) {
   const result = await _pr92Schema19PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -17282,7 +17281,7 @@ const _pr92Schema20PriorAtomicAttachmentSubmitExpression =
   _pr92Schema7AtomicAttachmentSubmitExpression;
 const _pr92Schema20PriorIsConversationWrite = isConversationWrite;
 const _pr92Schema20PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
-const _pr92Schema20PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema20PriorExecuteNativeTurn = _productionTurnStage48;
 const PR92_SCHEMA20_REPAIR_SCHEMA = 20;
 const PR92_SCHEMA20_REQUEST_CORRELATION =
   "PAGE_SIDE_ARMED_SINGLE_CONVERSATION_POST";
@@ -17443,7 +17442,7 @@ executeOfficialPageTurn = async function _pr92Schema20ExecuteOfficialPageTurnWit
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema20Repair(message) {
+const _productionTurnStage49 = async function _executeNativeTurnWithPr92Schema20Repair(message) {
   const result = await _pr92Schema20PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -17479,7 +17478,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema20Repair(mess
 // schema-7 validation and the final page-side deadline check have succeeded. The
 // marker and click remain synchronous in the same Runtime.evaluate page task.
 
-const _pr92Schema21PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema21PriorExecuteNativeTurn = _productionTurnStage49;
 const PR92_SCHEMA21_REPAIR_SCHEMA = 21;
 const PR92_SCHEMA21_ARM_BOUNDARY =
   "AFTER_ALL_VALIDATION_IMMEDIATELY_BEFORE_BUTTON_CLICK";
@@ -17519,7 +17518,7 @@ _pr92Schema7AtomicAttachmentSubmitExpression = function _pr92Schema21ValidatedCl
   );
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema21Repair(message) {
+const _productionTurnStage50 = async function _executeNativeTurnWithPr92Schema21Repair(message) {
   const result = await _pr92Schema21PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -17550,7 +17549,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema21Repair(mess
 // or stale attachment still blocks pre-stage cleanliness even if its filename
 // group is absent or arranged differently by the page.
 
-const _pr92Schema22PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema22PriorExecuteNativeTurn = _productionTurnStage50;
 const PR92_SCHEMA22_REPAIR_SCHEMA = 22;
 
 function _pr92Schema22AttachmentEvidenceExpression(expectedNames) {
@@ -17687,7 +17686,7 @@ function _pr92Schema22AttachmentEvidenceExpression(expectedNames) {
 // boundary rather than being a special-case live-gate bypass.
 _pr92ClosureAttachmentEvidenceExpression = _pr92Schema22AttachmentEvidenceExpression;
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema22Repair(message) {
+const _productionTurnStage51 = async function _executeNativeTurnWithPr92Schema22Repair(message) {
   const result = await _pr92Schema22PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -17720,7 +17719,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema22Repair(mess
 // clean-composer false positive. Structured removal controls remain a second,
 // independent evidence channel exactly as before.
 
-const _pr92Schema23PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema23PriorExecuteNativeTurn = _productionTurnStage51;
 const PR92_SCHEMA23_REPAIR_SCHEMA = 23;
 
 function _pr92Schema23AttachmentEvidenceExpression(expectedNames) {
@@ -17883,7 +17882,7 @@ function _pr92Schema23AttachmentEvidenceExpression(expectedNames) {
 // classification therefore governs every attachment-authority boundary.
 _pr92ClosureAttachmentEvidenceExpression = _pr92Schema23AttachmentEvidenceExpression;
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema23Repair(message) {
+const _productionTurnStage52 = async function _executeNativeTurnWithPr92Schema23Repair(message) {
   const result = await _pr92Schema23PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -17918,7 +17917,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema23Repair(mess
 // closed immediately. The mount wait consumes the same single outer rich-turn
 // deadline; there is no retry, staging, or protected-write authority in this phase.
 
-const _pr92Schema24PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema24PriorExecuteNativeTurn = _productionTurnStage52;
 const PR92_SCHEMA24_REPAIR_SCHEMA = 24;
 
 async function _pr92Schema24WaitForOfficialComposerMounted(debuggee, context) {
@@ -18027,7 +18026,7 @@ _pr92Schema10RequireOfficialCleanComposerBeforeStaging = async function _pr92Sch
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema24Repair(message) {
+const _productionTurnStage53 = async function _executeNativeTurnWithPr92Schema24Repair(message) {
   const result = await _pr92Schema24PriorExecuteNativeTurn(message);
   if (message?.characterizeRichInputSupport !== true) return result;
   return {
@@ -18053,7 +18052,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema24Repair(mess
 // the current official composer DOM and executes the same schema-24 production
 // mount wait + empty-set clean proof used before attachment staging.
 
-const _pr92Schema23DiagnosticPriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema23DiagnosticPriorExecuteNativeTurn = _productionTurnStage53;
 
 function _pr92Schema23DiagnosticBestEffortDetach(debuggee) {
   try {
@@ -18141,7 +18140,7 @@ function _pr92Schema23DiagnosticExpression() {
   })()`;
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema23Diagnostic(message) {
+const _productionTurnStage54 = async function _executeNativeTurnWithPr92Schema23Diagnostic(message) {
   if (message?.diagnosePr92ComposerEvidence !== true) {
     return _pr92Schema23DiagnosticPriorExecuteNativeTurn(message);
   }
@@ -18262,7 +18261,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema23Diagnostic(
 // therefore fails exact basename comparison closed. No substring/suffix matching,
 // write retry, fallback transport, or new submit authority is introduced.
 
-const _pr92Schema25PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema25PriorExecuteNativeTurn = _productionTurnStage54;
 const PR92_SCHEMA25_REPAIR_SCHEMA = 25;
 
 function _pr92Schema25RemovalControlBasename(label) {
@@ -18453,7 +18452,7 @@ function _pr92Schema25DiagnosticRemovalNormalization(result) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema25Repair(message) {
+const _productionTurnStage55 = async function _executeNativeTurnWithPr92Schema25Repair(message) {
   const result = await _pr92Schema25PriorExecuteNativeTurn(message);
 
   if (message?.diagnosePr92ComposerEvidence === true && result && typeof result === "object") {
@@ -18498,7 +18497,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema25Repair(mess
 //   * exact-set, cross-channel, staging, deadline, fence, request-correlation and
 //     protected-submit authority are otherwise unchanged.
 
-const _pr92Schema26PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema26PriorExecuteNativeTurn = _productionTurnStage55;
 const PR92_SCHEMA26_REPAIR_SCHEMA = 26;
 
 function _pr92Schema26RemovalPostActionPayload(label) {
@@ -18712,7 +18711,7 @@ function _pr92Schema26DiagnosticRemovalNormalization(result) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema26Repair(message) {
+const _productionTurnStage56 = async function _executeNativeTurnWithPr92Schema26Repair(message) {
   const result = await _pr92Schema26PriorExecuteNativeTurn(message);
 
   if (message?.diagnosePr92ComposerEvidence === true && result && typeof result === "object") {
@@ -18752,7 +18751,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema26Repair(mess
 // submit primitive. Staging may upload the selected file to the official page; that
 // page mutation is reported explicitly and is distinct from a conversation write.
 
-const _pr92Schema26StagingDiagnosticPriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema26StagingDiagnosticPriorExecuteNativeTurn = _productionTurnStage56;
 
 async function _pr92Schema26ReadStagedDiagnosticEvidence(tabId, attachmentPaths, context) {
   const debuggee = { tabId };
@@ -18799,7 +18798,7 @@ async function _pr92Schema26ReadStagedDiagnosticEvidence(tabId, attachmentPaths,
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema26StagingDiagnostic(message) {
+const _productionTurnStage57 = async function _executeNativeTurnWithPr92Schema26StagingDiagnostic(message) {
   if (message?.diagnosePr92StagedAttachmentEvidence !== true) {
     return _pr92Schema26StagingDiagnosticPriorExecuteNativeTurn(message);
   }
@@ -18927,7 +18926,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema26StagingDiag
 // role-group equals that exact interpretation. Non-indexed removal payloads retain
 // the schema-11 literal exact semantics.
 
-const _pr92Schema27PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema27PriorExecuteNativeTurn = _productionTurnStage57;
 const PR92_SCHEMA27_REPAIR_SCHEMA = 27;
 
 function _pr92Schema27RemovalPostActionPayload(label) {
@@ -19164,7 +19163,7 @@ function _pr92Schema27DiagnosticRemovalNormalization(result) {
   };
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema27Repair(message) {
+const _productionTurnStage58 = async function _executeNativeTurnWithPr92Schema27Repair(message) {
   const result = await _pr92Schema27PriorExecuteNativeTurn(message);
 
   if (message?.diagnosePr92ComposerEvidence === true && result && typeof result === "object") {
@@ -19200,9 +19199,9 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema27Repair(mess
 // schema-27 page-owned evidence expression, then requires the schema-27 ambiguity
 // proof before invoking the existing durable-fence destructive cleanup.
 
-const _pr92Schema27StagingDiagnosticPriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema27StagingDiagnosticPriorExecuteNativeTurn = _productionTurnStage58;
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema27StagingDiagnostic(message) {
+const _productionTurnStage59 = async function _executeNativeTurnWithPr92Schema27StagingDiagnostic(message) {
   if (message?.diagnosePr92StagedAttachmentEvidenceSchema27 !== true) {
     return _pr92Schema27StagingDiagnosticPriorExecuteNativeTurn(message);
   }
@@ -19347,7 +19346,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema27StagingDiag
 // decodes CDP base64 response-body representation as UTF-8, and fails closed if
 // multiple stream_handoff records disagree on conversation identity.
 
-const _pr92Schema28PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema28PriorExecuteNativeTurn = _productionTurnStage59;
 const _pr92Schema28PriorExtractSafeStreamMetadata = extractSafeStreamMetadata;
 const PR92_SCHEMA28_REPAIR_SCHEMA = 28;
 const PR92_SCHEMA28_COMMITTED_IDENTITY_ERROR =
@@ -19574,7 +19573,7 @@ async function _pr92Schema28CommittedIdentityDiagnostic(message) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema28Repair(message) {
+const _productionTurnStage60 = async function _executeNativeTurnWithPr92Schema28Repair(message) {
   if (message?.diagnosePr92CommittedIdentityStateSchema28 === true) {
     return _pr92Schema28CommittedIdentityDiagnostic(message);
   }
@@ -19638,7 +19637,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema28Repair(mess
 // Turn deadlines are monotonic (performance.now based), so every local diagnostic
 // sub-budget below deliberately stays in that same clock domain.
 
-const _pr92Schema28DiagnosticRepairPriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema28DiagnosticRepairPriorExecuteNativeTurn = _productionTurnStage60;
 const PR92_SCHEMA28_DIAGNOSTIC_ROUTE_SAMPLE_MAX_MS = 250;
 const PR92_SCHEMA28_DIAGNOSTIC_CLEANUP_RESERVE_MS = 10000;
 const PR92_SCHEMA28_DIAGNOSTIC_RETURN_RESERVE_MS = 1000;
@@ -19830,7 +19829,7 @@ async function _pr92Schema28CommittedIdentityDiagnosticRepaired(message) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema28DiagnosticRepair(message) {
+const _productionTurnStage61 = async function _executeNativeTurnWithPr92Schema28DiagnosticRepair(message) {
   if (message?.diagnosePr92CommittedIdentityStateSchema28 === true) {
     return _pr92Schema28CommittedIdentityDiagnosticRepaired(message);
   }
@@ -19880,7 +19879,7 @@ executeNativeTurn = async function _executeNativeTurnWithPr92Schema28DiagnosticR
 // forbidden. Raw request text, postData, request ids, message ids, and conversation
 // ids are never emitted in diagnostics.
 
-const _pr92Schema29PriorExecuteNativeTurn = executeNativeTurn;
+const _pr92Schema29PriorExecuteNativeTurn = _productionTurnStage61;
 const _pr92Schema29PriorExecuteOfficialPageTurn = executeOfficialPageTurn;
 const _pr92Schema29PriorExtractSafeStreamMetadata = extractSafeStreamMetadata;
 const PR92_SCHEMA29_REPAIR_SCHEMA = 29;
@@ -20519,7 +20518,7 @@ executeOfficialPageTurn = async function _pr92Schema29ExecuteOfficialPageTurn(ar
   }
 };
 
-executeNativeTurn = async function _executeNativeTurnWithPr92Schema29Repair(message) {
+const _productionTurnStage62 = async function _executeNativeTurnWithPr92Schema29Repair(message) {
   const isRichWrite =
     Array.isArray(message?.attachmentPaths) && message.attachmentPaths.length > 0;
   if (isRichWrite) {
@@ -20924,7 +20923,7 @@ _pr812InspectMessage = function _pr812InspectMessageWithStructuredSources(contex
 // Bridge submission boundary v2: type + one click + observed official conversation POST.
 // Reply generation is owned by the persistent page observer, not this request.
 
-const _submitOnlyPriorExecuteNativeTurn = executeNativeTurn;
+const _submitOnlyPriorExecuteNativeTurn = _productionTurnStage62;
 let _submitOnlyAcknowledgedPageTurn = null;
 const CWA_SUBMIT_COMMIT_OBSERVATION_MS = 5_000;
 
@@ -21129,7 +21128,7 @@ async function _executeSubmitOnlyPageTurn({ tabId, text, timeoutMs }) {
   }
 }
 
-executeNativeTurn = async function _executeNativeTurnWithSubmitOnly(message) {
+const _productionTurnStage63 = async function _executeNativeTurnWithSubmitOnly(message) {
   if (message?.submitOnly !== true) return _submitOnlyPriorExecuteNativeTurn(message);
   if (Array.isArray(message?.attachmentPaths) && message.attachmentPaths.length > 0) {
     throw new Error("BROWSER_NATIVE_SUBMIT_ONLY_RICH_INPUT_UNSUPPORTED");
@@ -22633,8 +22632,8 @@ async function _cwaObserveTurn(message) {
   return _cwaPublicObservation(record);
 }
 
-const _cwaPersistentPriorExecuteNativeTurn = executeNativeTurn;
-executeNativeTurn = async function _executeNativeTurnWithPersistentObservation(message) {
+const _cwaPersistentPriorExecuteNativeTurn = _productionTurnStage63;
+const _productionTurnStage64 = async function _executeNativeTurnWithPersistentObservation(message) {
   if (message?.type === "observe_turn") return _cwaObserveTurn(message);
   if (message?.type === "turn" && message?.submitOnly === true) {
     const tab = await ensureRuntimeTab(
@@ -22683,6 +22682,8 @@ async function _cwaEnsureListSurface(message) {
 /* END legacy source: service_worker_persistent_turn_observer_v3.js */
 
 
+const composedTurnExecutor = _productionTurnStage64;
+
 // Transitional Task-5 boundary: expose final assembled turn behavior and the
 // named native-message capabilities used by the explicit production router.
 function _tryBeginNativeRequest(requestId) {
@@ -22726,7 +22727,7 @@ export function getLegacyRuntimeCallbacks() {
     ensureListSurface: _cwaEnsureListSurface,
   });
   return Object.freeze({
-    executeTurn: executeNativeTurn,
+    executeTurn: composedTurnExecutor,
     startNativeBridge: connectNativeBridge,
     ownsObservedTab: globalThis._cwaPersistentObserverOwnsTab ?? null,
     nativeMessageCapabilities,

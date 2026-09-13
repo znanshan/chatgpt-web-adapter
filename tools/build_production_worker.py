@@ -9,6 +9,12 @@ EXTENSION_ROOT = REPO_ROOT / "src" / "chatgpt_web_adapter" / "browser_native_ext
 SOURCE_ENTRY = "service_worker_entry_v3.js"
 OUTPUT = EXTENSION_ROOT / "production" / "legacy_runtime.js"
 _IMPORT = re.compile(r'^\s*importScripts\("([^"]+)"\);?\s*$', re.MULTILINE)
+_BASE_TURN_DECL = "async function executeNativeTurn(message) {"
+_TURN_CHAIN = re.compile(
+    r"(?P<prior>const\s+(?P<prior_name>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*executeNativeTurn\s*;)"
+    r"|(?P<assignment>^executeNativeTurn\s*=\s*)",
+    re.MULTILINE,
+)
 _NATIVE_ROUTER_PRIORS = {
     "service_worker_runtime_tab_reconciliation.js": "const _pr88PriorOnNativeMessage = onNativeMessage;",
     "service_worker_external_operation_v2_1.js": "const _cwaCharPriorOnNativeMessage = onNativeMessage;",
@@ -83,7 +89,7 @@ _EXPORT_TAIL = (
     "    ensureListSurface: _cwaEnsureListSurface,\n"
     "  });\n"
     "  return Object.freeze({\n"
-    "    executeTurn: executeNativeTurn,\n"
+    "    executeTurn: composedTurnExecutor,\n"
     "    startNativeBridge: connectNativeBridge,\n"
     "    ownsObservedTab: globalThis._cwaPersistentObserverOwnsTab ?? null,\n"
     "    nativeMessageCapabilities,\n"
@@ -154,8 +160,56 @@ def flatten_script(name: str, stack: tuple[str, ...] = ()) -> str:
     return "".join(output)
 
 
+def compose_turn_executor(text: str) -> tuple[str, str, int]:
+    if text.count(_BASE_TURN_DECL) != 1:
+        raise RuntimeError("base turn executor marker mismatch")
+    text = text.replace(
+        _BASE_TURN_DECL,
+        "async function _baseExecuteNativeTurn(message) {",
+        1,
+    )
+    direct_call = "await executeNativeTurn(message)"
+    if text.count(direct_call) != 1:
+        raise RuntimeError("base turn dispatch marker mismatch")
+    text = text.replace(direct_call, "await composedTurnExecutor(message)", 1)
+
+    current = "_baseExecuteNativeTurn"
+    stage_count = 0
+    expecting_prior = True
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal current, stage_count, expecting_prior
+        prior_name = match.group("prior_name")
+        if prior_name is not None:
+            if not expecting_prior:
+                raise RuntimeError("turn executor prior appeared before assignment")
+            expecting_prior = False
+            return f"const {prior_name} = {current};"
+        if expecting_prior:
+            raise RuntimeError("turn executor assignment appeared without prior")
+        stage_count += 1
+        current = f"_productionTurnStage{stage_count:02d}"
+        expecting_prior = True
+        return f"const {current} = "
+
+    transformed = _TURN_CHAIN.sub(replace, text)
+    if not expecting_prior:
+        raise RuntimeError("turn executor prior missing assignment")
+    if stage_count == 0:
+        raise RuntimeError("turn executor wrapper chain missing")
+    return transformed, current, stage_count
+
+
 def render_legacy_runtime() -> str:
-    return _PREFIX + flatten_script(SOURCE_ENTRY) + _EXPORT_TAIL
+    flattened = _PREFIX + flatten_script(SOURCE_ENTRY)
+    composed, final_executor, stage_count = compose_turn_executor(flattened)
+    if stage_count != 64:
+        raise RuntimeError(f"turn executor stage count changed: {stage_count}")
+    return (
+        composed
+        + f"\n\nconst composedTurnExecutor = {final_executor};"
+        + _EXPORT_TAIL
+    )
 
 
 def main() -> int:
