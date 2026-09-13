@@ -1,0 +1,290 @@
+{
+  "native_messaging_failure": {
+    "expected": {
+      "error": "fixture snapshot failed",
+      "ok": false,
+      "request_id": "fixture-native-failure",
+      "type": "running_snapshot_result"
+    },
+    "message": {
+      "protocol": 1,
+      "request_id": "fixture-native-failure",
+      "type": "running_snapshot"
+    }
+  },
+  "projection_scenarios": [
+    {
+      "expected": [
+        {
+          "conversation_ref": "conversation-b",
+          "event_type": "route_change",
+          "metadata": {
+            "page_event_kind": "tab_updated",
+            "tab_id": 7,
+            "url_kind": "conversation",
+            "visible": true
+          },
+          "source": "page",
+          "status": "running"
+        }
+      ],
+      "name": "page_navigation",
+      "raw_events": [
+        {
+          "conversation_id": "conversation-b",
+          "kind": "tab_updated",
+          "seq": 0,
+          "source": "tab",
+          "source_seq": 0,
+          "t": 1000,
+          "tabId": 7,
+          "url_kind": "conversation",
+          "visible": true
+        }
+      ]
+    },
+    {
+      "expected": [
+        {
+          "event_type": "page_state",
+          "metadata": {
+            "page_event_kind": "tab_updated",
+            "tab_id": 7,
+            "url_kind": "root",
+            "visible": false
+          },
+          "source": "page",
+          "status": "running"
+        }
+      ],
+      "name": "visibility_change",
+      "raw_events": [
+        {
+          "kind": "tab_updated",
+          "seq": 0,
+          "source": "tab",
+          "source_seq": 0,
+          "t": 1000,
+          "tabId": 7,
+          "url_kind": "root",
+          "visible": false
+        }
+      ]
+    },
+    {
+      "expected": [
+        {
+          "conversation_ref": "conversation-x",
+          "event_type": "route_change",
+          "metadata": {
+            "tab_id": 7,
+            "visible": true
+          },
+          "source": "page"
+        },
+        {
+          "conversation_ref": "conversation-x",
+          "event_type": "route_change",
+          "metadata": {
+            "tab_id": 8,
+            "visible": false
+          },
+          "source": "page"
+        }
+      ],
+      "name": "duplicate_tabs",
+      "raw_events": [
+        {
+          "conversation_id": "conversation-x",
+          "kind": "tab_updated",
+          "seq": 0,
+          "source": "tab",
+          "source_seq": 0,
+          "t": 1000,
+          "tabId": 7,
+          "url_kind": "conversation",
+          "visible": true
+        },
+        {
+          "conversation_id": "conversation-x",
+          "kind": "tab_updated",
+          "seq": 1,
+          "source": "tab",
+          "source_seq": 1,
+          "t": 1001,
+          "tabId": 8,
+          "url_kind": "conversation",
+          "visible": false
+        }
+      ]
+    },
+    {
+      "expected": [
+        {
+          "event_type": "page_state",
+          "metadata": {
+            "banners": [
+              "banner-delivery-error"
+            ],
+            "composer": true,
+            "retry": true,
+            "stop": false,
+            "turns": 2
+          },
+          "source": "page"
+        }
+      ],
+      "name": "delivery_error_banner",
+      "raw_events": [
+        {
+          "dom": {
+            "banners": [
+              "banner-delivery-error"
+            ],
+            "composer": true,
+            "retry": true,
+            "stop": false,
+            "turns": 2
+          },
+          "seq": 0,
+          "source": "dom",
+          "source_seq": 0,
+          "t": 1000,
+          "tabId": 7
+        }
+      ]
+    },
+    {
+      "expected": [
+        {
+          "event_type": "page_state",
+          "metadata": {
+            "composer": true,
+            "retry": true,
+            "stop": true
+          },
+          "source": "page"
+        }
+      ],
+      "name": "stop_retry_controls",
+      "raw_events": [
+        {
+          "dom": {
+            "banners": [],
+            "composer": true,
+            "retry": true,
+            "stop": true,
+            "turns": 3
+          },
+          "seq": 0,
+          "source": "dom",
+          "source_seq": 0,
+          "t": 1000,
+          "tabId": 7
+        }
+      ]
+    },
+    {
+      "expected": [
+        {
+          "event_type": "content_update",
+          "metadata": {
+            "bytes": 42,
+            "is_conversation_write": true,
+            "network_request_id": "req-tool",
+            "sse_event_types": [
+              "tool"
+            ],
+            "sse_paths": [
+              "/message/content"
+            ]
+          },
+          "source": "network"
+        }
+      ],
+      "name": "tool_activity",
+      "raw_events": [
+        {
+          "bytes": 42,
+          "is_conversation_write": true,
+          "method": "Network.dataReceived",
+          "request_id": "req-tool",
+          "seq": 0,
+          "source": "network",
+          "source_seq": 0,
+          "sse_event_types": [
+            "tool"
+          ],
+          "sse_paths": [
+            "/message/content"
+          ],
+          "t": 1000
+        }
+      ]
+    },
+    {
+      "expected": [
+        {
+          "event_type": "stream_finished",
+          "metadata": {
+            "close_code": 1006,
+            "network_request_id": "ws-old",
+            "ws_kind": "conversation"
+          },
+          "source": "network"
+        },
+        {
+          "event_type": "stream_data",
+          "metadata": {
+            "frame_bytes": 12,
+            "network_request_id": "ws-new",
+            "ws_kind": "conversation"
+          },
+          "source": "network"
+        },
+        {
+          "event_type": "stream_finished",
+          "metadata": {
+            "close_code": 1000,
+            "network_request_id": "ws-new",
+            "ws_kind": "conversation"
+          },
+          "source": "network"
+        }
+      ],
+      "name": "stream_reconnect_termination",
+      "raw_events": [
+        {
+          "close_code": 1006,
+          "method": "Network.webSocketClosed",
+          "request_id": "ws-old",
+          "seq": 0,
+          "source": "network",
+          "source_seq": 0,
+          "t": 1000,
+          "ws_kind": "conversation"
+        },
+        {
+          "method": "Network.webSocketFrameReceived",
+          "payload_bytes": 12,
+          "request_id": "ws-new",
+          "seq": 1,
+          "source": "network",
+          "source_seq": 1,
+          "t": 1001,
+          "ws_kind": "conversation"
+        },
+        {
+          "close_code": 1000,
+          "method": "Network.webSocketClosed",
+          "request_id": "ws-new",
+          "seq": 2,
+          "source": "network",
+          "source_seq": 2,
+          "t": 1002,
+          "ws_kind": "conversation"
+        }
+      ]
+    }
+  ]
+}
